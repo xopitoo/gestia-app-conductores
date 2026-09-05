@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login"];
+// Coincidencia exacta a propósito: "/" con startsWith haría pública toda la
+// app (todo path empieza con "/"), y no hay rutas hijas de /login.
+const PUBLIC_PATHS = ["/", "/login"];
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -32,7 +34,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isPublicPath = PUBLIC_PATHS.some((p) => path.startsWith(p));
+  const isPublicPath = PUBLIC_PATHS.includes(path);
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone();
