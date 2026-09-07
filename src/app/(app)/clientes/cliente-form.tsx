@@ -34,6 +34,9 @@ export function ClienteForm({
   const [state, formAction, pending] = useActionState(action, {});
   const [runt, setRunt] = useState(cliente?.runt ?? false);
   const [numeroDocumento, setNumeroDocumento] = useState(cliente?.numero_documento ?? "");
+  // Tope del selector de fecha para que no se puedan tipear años absurdos
+  // (ej. "32223") — el input type="date" del navegador no lo evita solo.
+  const hoy = new Date().toISOString().slice(0, 10);
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -164,6 +167,8 @@ export function ClienteForm({
             <input
               name="fecha_nacimiento"
               type="date"
+              min="1900-01-01"
+              max={hoy}
               defaultValue={cliente?.fecha_nacimiento ?? ""}
               className={inputClass}
             />
@@ -186,9 +191,17 @@ export function ClienteForm({
           <Field label="Teléfono de contacto" required>
             <input
               name="telefono"
+              type="tel"
+              inputMode="numeric"
               required
+              maxLength={10}
+              pattern="[0-9]{10}"
+              title="10 dígitos, sin espacios ni guiones"
               defaultValue={cliente?.telefono ?? ""}
-              placeholder="Número"
+              onChange={(e) => {
+                e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10);
+              }}
+              placeholder="Ej. 3001234567"
               className={inputClass}
             />
           </Field>
