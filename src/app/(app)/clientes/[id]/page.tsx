@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ShoppingBag } from "lucide-react";
 import { getViewerContext, requireOpenCaja } from "@/lib/viewer";
 import { actualizarCliente } from "../actions";
 import { ClienteForm } from "../cliente-form";
@@ -60,7 +60,16 @@ export default async function ClienteDetailPage({
               Huellas registradas: {cliente.fingerprints_enrolled}/2
             </p>
           </div>
-          <RuntConsultaLink documento={`${cliente.tipo_documento} ${cliente.numero_documento}`} />
+          <div className="flex shrink-0 items-center gap-2">
+            <RuntConsultaLink documento={`${cliente.tipo_documento} ${cliente.numero_documento}`} />
+            <Link
+              href={`/ventas/nueva?sede=${cliente.sede_id}&cliente=${cliente.id}`}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
+            >
+              <ShoppingBag className="h-4 w-4" />
+              Crear venta
+            </Link>
+          </div>
         </div>
       </div>
 

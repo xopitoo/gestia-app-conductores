@@ -10,9 +10,9 @@ export const metadata: Metadata = { title: "Registrar orden | Gestia App Conduct
 export default async function NuevaVentaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sede?: string }>;
+  searchParams: Promise<{ sede?: string; cliente?: string }>;
 }) {
-  const { sede: sedeParam } = await searchParams;
+  const { sede: sedeParam, cliente: clienteParam } = await searchParams;
   const ctx = await getViewerContext();
   await requireOpenCaja(ctx);
   const { supabase, sedes } = ctx;
@@ -82,7 +82,12 @@ export default async function NuevaVentaPage({
         </div>
       ) : (
         <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
-          <VentaForm sedeId={sedeId} clientes={clientes ?? []} productos={productos ?? []} />
+          <VentaForm
+            sedeId={sedeId}
+            clientes={clientes ?? []}
+            productos={productos ?? []}
+            clienteIdInicial={clienteParam}
+          />
         </div>
       )}
     </div>

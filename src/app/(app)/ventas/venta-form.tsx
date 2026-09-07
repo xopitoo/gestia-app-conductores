@@ -17,13 +17,16 @@ export function VentaForm({
   sedeId,
   clientes,
   productos,
+  clienteIdInicial,
 }: {
   sedeId: string;
   clientes: ClienteRow[];
   productos: ProductoRow[];
+  /** Precarga el cliente cuando se llega desde "Crear venta" en su ficha. */
+  clienteIdInicial?: string;
 }) {
   const [state, formAction, pending] = useActionState(registrarVenta, {});
-  const [clienteId, setClienteId] = useState("");
+  const [clienteId, setClienteId] = useState(clienteIdInicial ?? "");
   const [items, setItems] = useState<VentaItemInput[]>([]);
   const [q, setQ] = useState("");
   const [libreNombre, setLibreNombre] = useState("");
@@ -78,7 +81,7 @@ export function VentaForm({
         <select
           name="cliente_id"
           required
-          defaultValue=""
+          defaultValue={clienteIdInicial ?? ""}
           onChange={(e) => setClienteId(e.target.value)}
           className={inputClass}
         >
