@@ -147,6 +147,8 @@ export type VentaPagoRow = {
   sede_id: string;
   monto: number;
   metodo_pago: MetodoPago;
+  metodo_pago_editado_por: string | null;
+  metodo_pago_editado_at: string | null;
   created_by: string;
   created_at: string;
 };
@@ -216,6 +218,7 @@ export type CajaMovimientoRow = {
   monto: number;
   metodo_pago: MetodoPago | null;
   venta_id: string | null;
+  venta_pago_id: string | null;
   created_by: string;
   created_at: string;
 };
@@ -271,6 +274,10 @@ export type Database = {
         },
         VentaRow
       >;
+      corregir_forma_pago_venta: FunctionDef<
+        { p_venta_pago_id: string; p_metodo_pago: MetodoPago },
+        VentaPagoRow
+      >;
       aplicar_descuento_venta: FunctionDef<
         {
           p_venta_id: string;
@@ -285,6 +292,14 @@ export type Database = {
       >;
       set_org_pin: FunctionDef<{ p_pin: string }, null>;
       verify_org_pin: FunctionDef<{ p_pin: string }, boolean>;
+      check_login_lockout: FunctionDef<
+        { p_email: string },
+        { locked: boolean; retry_after_seconds?: number }
+      >;
+      record_login_attempt: FunctionDef<
+        { p_email: string; p_success: boolean },
+        null
+      >;
       crear_cotizacion: FunctionDef<
         {
           p_sede_id: string;

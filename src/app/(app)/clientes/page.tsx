@@ -32,7 +32,7 @@ export default async function ClientesPage({
     .select(
       "id, sede_id, tipo_documento, numero_documento, nombre_completo, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active",
     )
-    .order("nombre_completo");
+    .order("created_at", { ascending: false });
 
   if (q) {
     query = query.or(`nombre_completo.ilike.%${q}%,numero_documento.ilike.%${q}%`);

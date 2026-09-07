@@ -1,13 +1,18 @@
+import Image from "next/image";
 import { Space_Grotesk, DM_Sans } from "next/font/google";
 import {
   Banknote,
   Building2,
+  CheckCircle2,
   GraduationCap,
+  Laptop,
   ShieldCheck,
   ShoppingBag,
+  Smartphone,
   Users,
 } from "lucide-react";
 import { LoginForm } from "./login/login-form";
+import { ParallaxLayer } from "@/components/parallax-layer";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-display",
@@ -127,6 +132,76 @@ export function LandingPage() {
                 </div>
                 <LoginForm redirectTo="/" />
               </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Multi-dispositivo, con parallax */}
+        <section className="relative overflow-hidden border-t border-white/10 px-6 py-20 sm:px-10 sm:py-28">
+          <div
+            aria-hidden="true"
+            className="blob pointer-events-none absolute top-1/3 right-0 h-[420px] w-[420px] translate-x-1/3 rounded-full bg-gradient-to-tr from-fuchsia-600 via-violet-600 to-indigo-500 opacity-30 blur-[110px]"
+          />
+
+          <div className="relative mx-auto grid max-w-6xl grid-cols-1 items-center gap-16 lg:grid-cols-2">
+            <div>
+              <span className="font-body rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-medium tracking-wide text-indigo-200 uppercase">
+                Fácil de usar
+              </span>
+              <h2 className="font-display mt-5 text-3xl font-bold text-white sm:text-4xl">
+                Amigable de verdad — en el celular o en el computador
+              </h2>
+              <p className="font-body mt-4 max-w-md text-slate-300">
+                No hay que instalar nada. Se abre desde cualquier navegador y se ve bien tanto si
+                la recepción trabaja desde el celular como si el administrador prefiere revisar
+                todo desde su computador.
+              </p>
+              <ul className="font-body mt-6 flex flex-col gap-3 text-sm text-slate-300">
+                <li className="flex items-start gap-2.5">
+                  <Smartphone className="mt-0.5 h-4.5 w-4.5 shrink-0 text-fuchsia-400" aria-hidden="true" />
+                  Pantallas simples para registrar una venta desde el celular en segundos.
+                </li>
+                <li className="flex items-start gap-2.5">
+                  <Laptop className="mt-0.5 h-4.5 w-4.5 shrink-0 text-indigo-400" aria-hidden="true" />
+                  Panel completo con gráficos y reportes para el administrador, en pantalla grande.
+                </li>
+                <li className="flex items-start gap-2.5">
+                  <CheckCircle2 className="mt-0.5 h-4.5 w-4.5 shrink-0 text-emerald-400" aria-hidden="true" />
+                  El mismo dato, actualizado al instante, se vea desde donde se vea.
+                </li>
+              </ul>
+            </div>
+
+            <div className="relative h-[380px] sm:h-[440px]">
+              <ParallaxLayer
+                speed={0.12}
+                className="absolute top-0 right-0 left-0 mx-auto w-full max-w-[500px] sm:right-0 sm:left-auto sm:mx-0"
+              >
+                <div className="overflow-hidden rounded-2xl shadow-[0_40px_70px_-20px_rgba(0,0,0,0.65)]">
+                  <Image
+                    src="/marketing/laptop-mockup.png"
+                    alt="Dashboard de Gestia App Conductores en un computador portátil"
+                    width={1280}
+                    height={720}
+                    className="h-auto w-full"
+                    priority
+                  />
+                </div>
+              </ParallaxLayer>
+              <ParallaxLayer
+                speed={-0.16}
+                className="absolute bottom-0 left-1/2 -translate-x-1/2 sm:bottom-[-2.5rem] sm:left-0 sm:translate-x-0"
+              >
+                <div className="w-[190px] overflow-hidden rounded-2xl shadow-[0_35px_60px_-15px_rgba(0,0,0,0.6)] sm:w-[220px]">
+                  <Image
+                    src="/marketing/phone-mockup.png"
+                    alt="Aplicación Gestia App Conductores mostrada en un celular"
+                    width={1080}
+                    height={1350}
+                    className="h-auto w-full"
+                  />
+                </div>
+              </ParallaxLayer>
             </div>
           </div>
         </section>

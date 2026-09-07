@@ -33,7 +33,7 @@ export default async function NuevaCotizacionPage({
       )
       .eq("sede_id", sedeId)
       .eq("active", true)
-      .order("nombre_completo"),
+      .order("created_at", { ascending: false }),
     supabase
       .from("productos")
       .select("id, organization_id, nombre, descripcion, precio, categoria, active, created_by, created_at, updated_at")

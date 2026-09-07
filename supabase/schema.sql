@@ -259,6 +259,13 @@ alter table public.venta_pagos
   add constraint venta_pagos_metodo_pago_check
   check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'otro'));
 
+-- Rastro de auditoría de corregir_forma_pago_venta (más abajo) — venta_pagos
+-- sigue siendo un registro inmutable para todo lo demás (monto, venta_id,
+-- etc.), pero corregir el método de pago sí queda permitido y con rastro de
+-- quién y cuándo, para no perder trazabilidad en un sistema de dinero.
+alter table public.venta_pagos add column if not exists metodo_pago_editado_por uuid references public.profiles (id);
+alter table public.venta_pagos add column if not exists metodo_pago_editado_at timestamptz;
+
 create index if not exists venta_pagos_venta_id_idx on public.venta_pagos (venta_id);
 create index if not exists venta_pagos_organization_id_idx on public.venta_pagos (organization_id);
 create index if not exists venta_pagos_sede_id_idx on public.venta_pagos (sede_id);
@@ -358,6 +365,13 @@ create table if not exists public.caja_movimientos (
   created_by uuid not null references public.profiles (id),
   created_at timestamptz not null default now()
 );
+-- Liga este movimiento al venta_pago puntual que lo generó (uno de los
+-- pagos de la venta, no la venta entera) — así corregir_forma_pago_venta
+-- sabe exactamente qué movimiento de caja actualizar en vez de adivinar
+-- por monto/fecha. Nullable: los movimientos que no vienen de un pago de
+-- venta (egresos manuales, o filas creadas antes de esta columna) no
+-- tienen uno.
+alter table public.caja_movimientos add column if not exists venta_pago_id uuid references public.venta_pagos (id) on delete set null;
 alter table public.caja_movimientos drop constraint if exists caja_movimientos_metodo_pago_check;
 alter table public.caja_movimientos
   add constraint caja_movimientos_metodo_pago_check
@@ -367,6 +381,7 @@ create index if not exists caja_movimientos_caja_sesion_id_idx on public.caja_mo
 create index if not exists caja_movimientos_organization_id_idx on public.caja_movimientos (organization_id);
 create index if not exists caja_movimientos_sede_id_idx on public.caja_movimientos (sede_id);
 create index if not exists caja_movimientos_created_at_idx on public.caja_movimientos (created_at);
+create index if not exists caja_movimientos_venta_pago_id_idx on public.caja_movimientos (venta_pago_id);
 
 create or replace function public.enforce_open_caja_session()
 returns trigger
@@ -388,6 +403,25 @@ drop trigger if exists caja_movimientos_require_open_session on public.caja_movi
 create trigger caja_movimientos_require_open_session
   before insert on public.caja_movimientos
   for each row execute function public.enforce_open_caja_session();
+
+-- =========================================================
+-- LOGIN_ATTEMPTS: registro de intentos de inicio de sesión, para frenar
+-- fuerza bruta. Se llena únicamente desde record_login_attempt /
+-- check_login_lockout (más abajo, ambas security definer) — nadie lee ni
+-- escribe la tabla directo (sin policies de RLS a propósito), ni siquiera
+-- un admin, para no exponer quién intentó entrar a qué cuenta.
+-- =========================================================
+create table if not exists public.login_attempts (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  success boolean not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists login_attempts_email_created_at_idx
+  on public.login_attempts (lower(email), created_at desc);
+
+alter table public.login_attempts enable row level security;
 
 -- =========================================================
 -- HELPERS DE RLS (security definer, evitan recursión de RLS al
@@ -434,6 +468,72 @@ as $$
     (select role = 'platform_owner' from public.profiles where id = auth.uid() and active = true),
     false
   );
+$$;
+
+-- =========================================================
+-- LOCKOUT DE LOGIN: 5 intentos fallidos seguidos (sin un login exitoso
+-- de por medio) en los últimos 15 minutos bloquean nuevos intentos para
+-- ese email. check_login_lockout se llama ANTES de intentar el login
+-- (así ni siquiera se gasta un intento contra Supabase Auth mientras está
+-- bloqueado); record_login_attempt se llama DESPUÉS, con el resultado.
+-- Case-insensitive porque Supabase Auth también lo es. security definer
+-- porque login_attempts no tiene policies (nadie la lee/escribe directo);
+-- se puede llamar sin sesión (rol anon) porque no hay grants explícitos
+-- que lo impidan — Postgres da EXECUTE a PUBLIC por default.
+-- =========================================================
+create or replace function public.check_login_lockout(p_email text)
+returns jsonb
+language plpgsql
+security definer
+stable
+set search_path = public
+as $$
+declare
+  v_last_success timestamptz;
+  v_failed_count int;
+  v_oldest_failed timestamptz;
+begin
+  select max(created_at) into v_last_success
+  from public.login_attempts
+  where lower(email) = lower(p_email) and success = true;
+
+  select count(*), min(created_at)
+  into v_failed_count, v_oldest_failed
+  from public.login_attempts
+  where lower(email) = lower(p_email)
+    and success = false
+    and created_at > now() - interval '15 minutes'
+    and created_at > coalesce(v_last_success, '-infinity'::timestamptz);
+
+  if v_failed_count >= 5 then
+    return jsonb_build_object(
+      'locked', true,
+      'retry_after_seconds', greatest(
+        0,
+        extract(epoch from (v_oldest_failed + interval '15 minutes' - now()))::int
+      )
+    );
+  end if;
+
+  return jsonb_build_object('locked', false);
+end;
+$$;
+
+create or replace function public.record_login_attempt(p_email text, p_success boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.login_attempts (email, success)
+  values (p_email, p_success);
+
+  -- Poda oportunista para que la tabla no crezca para siempre — no hace
+  -- falta un cron aparte, con limpiar un poco en cada intento alcanza.
+  delete from public.login_attempts
+  where created_at < now() - interval '1 day';
+end;
 $$;
 
 -- =========================================================
@@ -536,6 +636,7 @@ declare
   v_concepto text;
   v_item jsonb;
   v_pago jsonb;
+  v_pago_id uuid;
 begin
   if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
     raise exception 'Debe seleccionar al menos un producto';
@@ -618,14 +719,15 @@ begin
     values (
       v_venta.id, v_org_id, p_sede_id,
       (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', auth.uid()
-    );
+    )
+    returning id into v_pago_id;
 
     insert into public.caja_movimientos (
-      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, created_by
+      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, venta_pago_id, created_by
     )
     values (
       v_sesion_id, v_org_id, p_sede_id, 'ingreso', v_concepto,
-      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', v_venta.id, auth.uid()
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', v_venta.id, v_pago_id, auth.uid()
     );
   end loop;
 
@@ -653,6 +755,7 @@ declare
   v_pagado_previo numeric(12, 2);
   v_monto_nuevo numeric(12, 2);
   v_pago jsonb;
+  v_pago_id uuid;
 begin
   if p_pagos is null or jsonb_typeof(p_pagos) <> 'array' or jsonb_array_length(p_pagos) = 0 then
     raise exception 'Debe registrar al menos un pago';
@@ -690,14 +793,15 @@ begin
     values (
       p_venta_id, v_venta.organization_id, v_venta.sede_id,
       (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', auth.uid()
-    );
+    )
+    returning id into v_pago_id;
 
     insert into public.caja_movimientos (
-      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, created_by
+      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, venta_pago_id, created_by
     )
     values (
       v_sesion_id, v_venta.organization_id, v_venta.sede_id, 'ingreso', v_venta.concepto,
-      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', p_venta_id, auth.uid()
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', p_venta_id, v_pago_id, auth.uid()
     );
   end loop;
 
@@ -707,6 +811,79 @@ begin
   returning * into v_venta;
 
   return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- CORREGIR_FORMA_PAGO_VENTA: cambia el método de pago de UN pago puntual
+-- ya registrado (ej. se cargó "efectivo" por error y era "transferencia").
+-- No toca monto, venta_id ni nada más — venta_pagos sigue siendo inmutable
+-- para todo lo demás. Se replica el cambio al caja_movimientos que generó
+-- ese pago (por venta_pago_id) para que el cierre de caja no quede
+-- descuadrado. security definer porque venta_pagos/caja_movimientos no
+-- tienen policy de update para nadie (por diseño); el chequeo de permisos
+-- se hace acá a mano, igual que en set_org_pin.
+--
+-- admin: puede corregir cualquier pago de su organización, en cualquier
+-- momento. recepcionista: solo pagos de su propia sede, y solo mientras la
+-- caja de esa sede siga abierta — una vez cerrada, ese cierre ya se
+-- imprimió/cuadró y no se puede reescribir desde acá.
+-- =========================================================
+create or replace function public.corregir_forma_pago_venta(
+  p_venta_pago_id uuid,
+  p_metodo_pago text
+)
+returns public.venta_pagos
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pago public.venta_pagos;
+  v_rol text;
+  v_sesion_abierta boolean;
+begin
+  select * into v_pago from public.venta_pagos where id = p_venta_pago_id;
+  if v_pago.id is null or v_pago.organization_id is distinct from public.current_org_id() then
+    raise exception 'Pago no encontrado';
+  end if;
+
+  v_rol := public.current_role();
+
+  if v_rol = 'admin' then
+    -- sin restricción adicional: org-wide, en cualquier momento.
+    null;
+  elsif v_rol = 'recepcionista' then
+    if v_pago.sede_id is distinct from public.current_sede_id() then
+      raise exception 'No autorizado';
+    end if;
+    select exists(
+      select 1 from public.caja_sesiones
+      where sede_id = v_pago.sede_id and estado = 'abierta'
+    ) into v_sesion_abierta;
+    if not v_sesion_abierta then
+      raise exception 'Abrí la caja de esta sede para poder corregir la forma de pago';
+    end if;
+  else
+    raise exception 'No autorizado';
+  end if;
+
+  if p_metodo_pago not in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'otro') then
+    raise exception 'Forma de pago inválida';
+  end if;
+
+  update public.venta_pagos
+  set metodo_pago = p_metodo_pago,
+      metodo_pago_editado_por = auth.uid(),
+      metodo_pago_editado_at = now()
+  where id = p_venta_pago_id
+  returning * into v_pago;
+
+  update public.caja_movimientos
+  set metodo_pago = p_metodo_pago
+  where venta_pago_id = p_venta_pago_id;
+
+  return v_pago;
 end;
 $$;
 
@@ -974,6 +1151,7 @@ declare
   v_sesion_id uuid;
   v_monto_pagado numeric(12, 2);
   v_pago jsonb;
+  v_pago_id uuid;
   v_item record;
 begin
   select * into v_cot from public.cotizaciones where id = p_cotizacion_id for update;
@@ -1029,14 +1207,15 @@ begin
     values (
       v_venta.id, v_cot.organization_id, v_cot.sede_id,
       (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', auth.uid()
-    );
+    )
+    returning id into v_pago_id;
 
     insert into public.caja_movimientos (
-      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, created_by
+      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, venta_pago_id, created_by
     )
     values (
       v_sesion_id, v_cot.organization_id, v_cot.sede_id, 'ingreso', v_cot.concepto,
-      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', v_venta.id, auth.uid()
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', v_venta.id, v_pago_id, auth.uid()
     );
   end loop;
 

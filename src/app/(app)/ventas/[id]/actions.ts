@@ -3,10 +3,51 @@
 import { revalidatePath } from "next/cache";
 import { getViewerContext } from "@/lib/viewer";
 import { parsePagos } from "../parse-form-arrays";
+import type { MetodoPago } from "@/lib/supabase/types";
 
 export type AbonoFormState = {
   error?: string;
 };
+
+export type CorregirMetodoPagoState = {
+  error?: string;
+};
+
+/**
+ * Corrige solo la forma de pago de un pago ya registrado (ej. se cargó
+ * "efectivo" por error y era "transferencia"). Todo el resto de reglas
+ * (quién puede, hasta cuándo) vive en corregir_forma_pago_venta — acá solo
+ * se traduce el error de la base a un mensaje legible.
+ */
+export async function corregirMetodoPago(
+  ventaId: string,
+  _prevState: CorregirMetodoPagoState,
+  formData: FormData,
+): Promise<CorregirMetodoPagoState> {
+  const { supabase } = await getViewerContext();
+  const pagoId = String(formData.get("pago_id") ?? "");
+  const metodoPago = String(formData.get("metodo_pago") ?? "") as MetodoPago;
+
+  if (!pagoId || !metodoPago) {
+    return { error: "Datos inválidos." };
+  }
+
+  const { error } = await supabase.rpc("corregir_forma_pago_venta", {
+    p_venta_pago_id: pagoId,
+    p_metodo_pago: metodoPago,
+  });
+
+  if (error) {
+    if (error.message.includes("Abrí la caja")) {
+      return { error: "Abrí la caja de esta sede para poder corregir la forma de pago." };
+    }
+    return { error: "No se pudo corregir la forma de pago." };
+  }
+
+  revalidatePath(`/ventas/${ventaId}`);
+  revalidatePath("/caja");
+  return {};
+}
 
 export async function registrarAbono(
   _prevState: AbonoFormState,

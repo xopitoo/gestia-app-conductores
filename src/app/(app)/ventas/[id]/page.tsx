@@ -7,6 +7,7 @@ import { formatCOP, formatDateTime } from "@/lib/format";
 import { METODO_PAGO_LABEL } from "@/lib/supabase/types";
 import { AbonoForm } from "./abono-form";
 import { CertificadoRuntForm } from "./certificado-runt-form";
+import { EditarMetodoPago } from "./editar-metodo-pago";
 import { RuntBadge } from "@/app/(app)/clientes/runt-badge";
 import { RuntConsultaLink } from "@/components/runt-link";
 
@@ -24,7 +25,7 @@ export default async function VentaDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase } = await getViewerContext();
+  const { supabase, profile } = await getViewerContext();
 
   const { data: venta } = await supabase
     .from("ventas")
@@ -75,6 +76,10 @@ export default async function VentaDetailPage({
   const totalNeto = venta.monto - venta.descuento;
   const saldo = totalNeto - pagado;
   const estado = ESTADO_LABEL[venta.estado] ?? ESTADO_LABEL.pagada;
+
+  const puedeCorregirMetodoPago =
+    venta.estado !== "anulada" &&
+    (profile.role === "admin" || (profile.role === "recepcionista" && !!sesionAbierta));
 
   return (
     <div className="flex flex-col gap-6">
@@ -157,21 +162,26 @@ export default async function VentaDetailPage({
           <h2 className="mb-3 text-sm font-semibold text-slate-800">Historial de pagos</h2>
           <ul className="flex flex-col divide-y divide-slate-100">
             {(pagos ?? []).map((p) => (
-              <li key={p.id} className="flex items-center justify-between py-2 text-sm">
-                <div>
-                  <p className="text-slate-700">{METODO_PAGO_LABEL[p.metodo_pago] ?? p.metodo_pago}</p>
-                  <p className="text-xs text-slate-400">{formatDateTime(p.created_at)}</p>
+              <li key={p.id} className="flex flex-col gap-1 py-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-slate-700">{METODO_PAGO_LABEL[p.metodo_pago] ?? p.metodo_pago}</p>
+                    <p className="text-xs text-slate-400">{formatDateTime(p.created_at)}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium text-slate-800">{formatCOP(p.monto)}</span>
+                    <Link
+                      href={`/ventas/${venta.id}/recibo/${p.id}`}
+                      className="flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                      Recibo
+                    </Link>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-medium text-slate-800">{formatCOP(p.monto)}</span>
-                  <Link
-                    href={`/ventas/${venta.id}/recibo/${p.id}`}
-                    className="flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline"
-                  >
-                    <Printer className="h-3.5 w-3.5" />
-                    Recibo
-                  </Link>
-                </div>
+                {puedeCorregirMetodoPago ? (
+                  <EditarMetodoPago ventaId={venta.id} pagoId={p.id} metodoActual={p.metodo_pago} />
+                ) : null}
               </li>
             ))}
             {(pagos ?? []).length === 0 ? (
