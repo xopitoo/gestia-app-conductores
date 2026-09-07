@@ -82,8 +82,11 @@ export default async function CierreCajaPage({
   return (
     <div className="flex flex-col items-center gap-4">
       <style>{`@page { size: letter; margin: 0.5in; }`}</style>
-      <div className="print:hidden">
-        <PrintButton />
+      <div className="flex flex-col items-center gap-1.5 print:hidden">
+        <PrintButton label="Imprimir o guardar como PDF" />
+        <p className="text-xs text-slate-400">
+          En el diálogo, elegí tu impresora para imprimir, o &quot;Guardar como PDF&quot; para descargarlo.
+        </p>
       </div>
 
       <div className="w-[8.5in] max-w-full rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-800 print:w-auto print:rounded-none print:border-none print:p-0">
