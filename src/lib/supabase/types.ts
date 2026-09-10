@@ -63,6 +63,43 @@ export type ClienteRow = {
   updated_at: string;
 };
 
+export type TramitadorRow = {
+  id: string;
+  organization_id: string;
+  /** null = visible en todas las sedes; con valor, solo en esa sede. */
+  sede_id: string | null;
+  nombre: string;
+  /** Precio especial (mayorista) que le corresponde a la organización por cada venta suya — no lo que él gana. */
+  precio_especial: number;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Pago de comisión a un tramitador — inmutable, solo se inserta. */
+export type TramitadorPagoRow = {
+  id: string;
+  tramitador_id: string;
+  organization_id: string;
+  sede_id: string | null;
+  monto: number;
+  nota: string | null;
+  created_by: string;
+  created_at: string;
+};
+
+/** Precio especial de un tramitador para un producto puntual — ver tramitadores.precio_especial para el respaldo genérico. */
+export type TramitadorPrecioRow = {
+  id: string;
+  tramitador_id: string;
+  producto_id: string;
+  organization_id: string;
+  precio_especial: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Categoria = "multiple" | "individual";
 export type MetodoPago =
   | "efectivo"
@@ -71,7 +108,8 @@ export type MetodoPago =
   | "nequi"
   | "addi"
   | "credito"
-  | "otro";
+  | "otro"
+  | "cruce_tramitador";
 
 export const METODO_PAGO_LABEL: Record<MetodoPago, string> = {
   efectivo: "Efectivo",
@@ -81,13 +119,29 @@ export const METODO_PAGO_LABEL: Record<MetodoPago, string> = {
   addi: "Addi",
   credito: "Crédito",
   otro: "Otro",
+  cruce_tramitador: "Cruce con tramitador",
 };
+
+/** Métodos que se pueden elegir a mano al registrar un pago/egreso — excluye
+ * "cruce_tramitador", que solo lo genera cruzarSaldoTramitador (nunca es una
+ * elección manual, siempre va acompañado de descontar el saldo del tramitador). */
+export const METODO_PAGO_SELECCIONABLE: MetodoPago[] = [
+  "efectivo",
+  "transferencia",
+  "tarjeta",
+  "nequi",
+  "addi",
+  "credito",
+  "otro",
+];
 export type EstadoVenta = "pagada" | "abonada" | "anulada";
 export type DescuentoTipo = "porcentaje" | "fijo";
 
 export type ProductoRow = {
   id: string;
   organization_id: string;
+  /** null = visible en todas las sedes; con valor, solo en esa sede. */
+  sede_id: string | null;
   nombre: string;
   descripcion: string | null;
   precio: number;
@@ -111,6 +165,10 @@ export type VentaRow = {
   referido_nombre: string | null;
   /** Descuento en pesos sobre `monto` (bruto). Lo que hay que cobrar es `monto - descuento`. */
   descuento: number;
+  /** Tramitador formal (tabla tramitadores) que trajo a este cliente. */
+  tramitador_id: string | null;
+  /** Cuánto de esta venta le corresponde a la organización — no lo que gana el tramitador (esa es `monto - descuento - precio_tramitador`). */
+  precio_tramitador: number;
   /** Certificado RUNT subido — solo true si ya está paga por completo. */
   certificado: boolean;
   certificado_at: string | null;
@@ -243,6 +301,9 @@ export type Database = {
       profiles: TableDef<ProfileRow>;
       clientes: TableDef<ClienteRow>;
       productos: TableDef<ProductoRow>;
+      tramitadores: TableDef<TramitadorRow>;
+      tramitador_pagos: TableDef<TramitadorPagoRow>;
+      tramitador_precios: TableDef<TramitadorPrecioRow>;
       ventas: TableDef<VentaRow>;
       venta_items: TableDef<VentaItemRow>;
       venta_pagos: TableDef<VentaPagoRow>;
@@ -264,6 +325,8 @@ export type Database = {
           p_referido_nombre?: string | null;
           p_descuento_tipo?: DescuentoTipo | null;
           p_descuento_valor?: number;
+          p_tramitador_id?: string | null;
+          p_precio_tramitador?: number;
         },
         VentaRow
       >;
@@ -272,6 +335,10 @@ export type Database = {
           p_venta_id: string;
           p_pagos: VentaPagoInput[];
         },
+        VentaRow
+      >;
+      cruzar_saldo_tramitador: FunctionDef<
+        { p_venta_id: string; p_monto: number },
         VentaRow
       >;
       corregir_forma_pago_venta: FunctionDef<

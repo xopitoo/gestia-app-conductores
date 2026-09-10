@@ -52,6 +52,25 @@ export async function crearUsuarioRecepcionista(
   return {};
 }
 
+/**
+ * Reasigna la sede de un recepcionista ya creado (ej. lo movés a una sede
+ * nueva). `sede_id` bloqueado por lock_profile_privileged_columns para
+ * updates normales — hace falta el cliente admin (service role), igual que
+ * toggleUsuarioActive con `active`.
+ */
+export async function cambiarSedeUsuario(formData: FormData) {
+  const { profile } = await getViewerContext();
+  if (profile.role !== "admin") return;
+
+  const id = String(formData.get("id") ?? "");
+  const sedeId = String(formData.get("sede_id") ?? "") || null;
+  if (!id) return;
+
+  const admin = createAdminClient();
+  await admin.from("profiles").update({ sede_id: sedeId }).eq("id", id);
+  revalidatePath("/admin/usuarios");
+}
+
 export async function toggleUsuarioActive(formData: FormData) {
   const { profile } = await getViewerContext();
   if (profile.role !== "admin") return;

@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { corregirMetodoPago } from "./actions";
-import { METODO_PAGO_LABEL, type MetodoPago } from "@/lib/supabase/types";
+import { METODO_PAGO_LABEL, METODO_PAGO_SELECCIONABLE, type MetodoPago } from "@/lib/supabase/types";
 
 /**
  * Corrección puntual del método de pago de un pago ya registrado — para
@@ -31,6 +31,10 @@ export function EditarMetodoPago({
     eraPending.current = pending;
   }, [pending, state]);
 
+  // Un cruce con tramitador no es una corrección de "efectivo vs
+  // transferencia" — no se edita como un pago normal.
+  if (metodoActual === "cruce_tramitador") return null;
+
   if (!editando) {
     return (
       <button
@@ -53,9 +57,9 @@ export function EditarMetodoPago({
         defaultValue={metodoActual}
         className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
       >
-        {Object.entries(METODO_PAGO_LABEL).map(([value, label]) => (
+        {METODO_PAGO_SELECCIONABLE.map((value) => (
           <option key={value} value={value}>
-            {label}
+            {METODO_PAGO_LABEL[value]}
           </option>
         ))}
       </select>

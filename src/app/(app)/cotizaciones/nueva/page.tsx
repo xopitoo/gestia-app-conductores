@@ -36,10 +36,19 @@ export default async function NuevaCotizacionPage({
       .order("created_at", { ascending: false }),
     supabase
       .from("productos")
-      .select("id, organization_id, nombre, descripcion, precio, categoria, active, created_by, created_at, updated_at")
+      .select("id, organization_id, sede_id, nombre, descripcion, precio, categoria, active, created_by, created_at, updated_at")
       .eq("active", true)
+      .or(`sede_id.is.null,sede_id.eq.${sedeId}`)
       .order("nombre"),
   ]);
+
+  // Si la sede tiene su propio catálogo (ej. C.R.C. VALORAR), no se mezcla con
+  // los productos "de todas las sedes" — esos quedaron sin sede desde antes de
+  // que existiera este campo y en la práctica son del catálogo de las
+  // escuelas de conducción, no tienen nada que ver con un centro médico.
+  const productosSede = (productos ?? []).some((p) => p.sede_id === sedeId)
+    ? (productos ?? []).filter((p) => p.sede_id === sedeId)
+    : (productos ?? []);
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,7 +76,7 @@ export default async function NuevaCotizacionPage({
         </div>
       ) : (
         <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
-          <CotizacionForm sedeId={sedeId} clientes={clientes ?? []} productos={productos ?? []} />
+          <CotizacionForm sedeId={sedeId} clientes={clientes ?? []} productos={productosSede} />
         </div>
       )}
     </div>

@@ -22,9 +22,10 @@ export async function registrarVenta(
   const items = parseItems(String(formData.get("items") ?? "[]"));
   const pagos = parsePagos(String(formData.get("pagos") ?? "[]"));
   const pin = String(formData.get("pin") ?? "") || null;
-  const referidoNombre = String(formData.get("referido_nombre") ?? "").trim() || null;
   const descuentoTipo = (String(formData.get("descuento_tipo") ?? "") || null) as DescuentoTipo | null;
   const descuentoValor = Number(formData.get("descuento_valor") ?? 0) || 0;
+  const tramitadorId = String(formData.get("tramitador_id") ?? "") || null;
+  const precioTramitador = Number(formData.get("precio_tramitador") ?? 0) || 0;
 
   if (!sedeId || !clienteId) {
     return { error: "Completá el cliente." };
@@ -32,9 +33,9 @@ export async function registrarVenta(
   if (items.length === 0) {
     return { error: "Elegí al menos un producto." };
   }
-  if (pagos.length === 0) {
-    return { error: "Registrá al menos un pago." };
-  }
+  // pagos puede venir vacío: una venta puede quedar totalmente pendiente
+  // (ej. un tramitador trae gente y paga al día siguiente) — registrar_venta
+  // igual exige el PIN de autorización porque $0 pagado es menos del 50%.
 
   const { error } = await supabase.rpc("registrar_venta", {
     p_sede_id: sedeId,
@@ -43,9 +44,10 @@ export async function registrarVenta(
     p_pagos: pagos,
     p_vendedor_id: profile.id,
     p_pin: pin,
-    p_referido_nombre: referidoNombre,
     p_descuento_tipo: descuentoTipo,
     p_descuento_valor: descuentoValor,
+    p_tramitador_id: tramitadorId,
+    p_precio_tramitador: precioTramitador,
   });
 
   if (error) {
@@ -56,6 +58,9 @@ export async function registrarVenta(
       return { error: "PIN de autorización incorrecto." };
     }
     if (error.message.includes("descuento")) {
+      return { error: error.message };
+    }
+    if (error.message.includes("precio del tramitador")) {
       return { error: error.message };
     }
     if (error.message.includes("superar el total")) {

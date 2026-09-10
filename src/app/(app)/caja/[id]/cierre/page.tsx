@@ -39,18 +39,45 @@ export default async function CierreCajaPage({
   const ventaIds = [...new Set((movimientos ?? []).map((m) => m.venta_id).filter((v): v is string => !!v))];
   const { data: ventas } =
     ventaIds.length > 0
-      ? await supabase.from("ventas").select("id, cliente_id, referido_nombre").in("id", ventaIds)
+      ? await supabase
+          .from("ventas")
+          .select("id, cliente_id, referido_nombre, tramitador_id")
+          .in("id", ventaIds)
       : { data: [] };
 
   const clienteIds = [...new Set((ventas ?? []).map((v) => v.cliente_id))];
-  const { data: clientes } =
+  const tramitadorIds = [...new Set((ventas ?? []).map((v) => v.tramitador_id).filter((v): v is string => !!v))];
+  const [{ data: clientes }, { data: tramitadoresRows }, { data: todosLosPagos }] = await Promise.all([
     clienteIds.length > 0
-      ? await supabase.from("clientes").select("id, nombre_completo").in("id", clienteIds)
-      : { data: [] };
+      ? supabase.from("clientes").select("id, nombre_completo").in("id", clienteIds)
+      : Promise.resolve({ data: [] as { id: string; nombre_completo: string }[] }),
+    tramitadorIds.length > 0
+      ? supabase.from("tramitadores").select("id, nombre").in("id", tramitadorIds)
+      : Promise.resolve({ data: [] as { id: string; nombre: string }[] }),
+    // Se pide el historial COMPLETO de pagos de estas ventas (no solo los de
+    // esta caja) porque un abono de hoy puede completar una venta cuyo
+    // primer pago fue en una sesión de caja anterior — sin esto, ese primer
+    // pago de otro día jamás entraría en la comparación.
+    ventaIds.length > 0
+      ? supabase.from("venta_pagos").select("venta_id, created_at").in("venta_id", ventaIds)
+      : Promise.resolve({ data: [] as { venta_id: string; created_at: string }[] }),
+  ]);
+
+  // Primer momento en que se pagó algo de cada venta — cualquier pago
+  // posterior a ese instante es un abono, no el pago inicial.
+  const primerPagoDeVenta = new Map<string, string>();
+  for (const p of todosLosPagos ?? []) {
+    const actual = primerPagoDeVenta.get(p.venta_id);
+    if (!actual || p.created_at < actual) primerPagoDeVenta.set(p.venta_id, p.created_at);
+  }
 
   const ventaDe = (ventaId: string | null) => (ventas ?? []).find((v) => v.id === ventaId) ?? null;
   const clienteDe = (clienteId: string | undefined) =>
     (clientes ?? []).find((c) => c.id === clienteId)?.nombre_completo ?? "—";
+  const referidoDe = (venta: NonNullable<ReturnType<typeof ventaDe>>) =>
+    (venta.tramitador_id
+      ? (tramitadoresRows ?? []).find((t) => t.id === venta.tramitador_id)?.nombre
+      : venta.referido_nombre) ?? "—";
   const nombreDe = (userId: string | null) =>
     (perfiles ?? []).find((p) => p.id === userId)?.full_name ?? "—";
 
@@ -167,6 +194,7 @@ export default async function CierreCajaPage({
               <tr className="border-b border-slate-300 text-left text-slate-500">
                 <th className="py-1.5 pr-2 font-medium">Hora</th>
                 <th className="py-1.5 pr-2 font-medium">Cliente</th>
+                <th className="py-1.5 pr-2 font-medium">Tipo</th>
                 <th className="py-1.5 pr-2 font-medium">Referido</th>
                 <th className="py-1.5 pr-2 font-medium">Método</th>
                 <th className="py-1.5 pl-2 text-right font-medium">Monto</th>
@@ -175,6 +203,11 @@ export default async function CierreCajaPage({
             <tbody>
               {ingresos.map((m) => {
                 const venta = ventaDe(m.venta_id);
+                // El pago inicial de una venta es el que coincide con el
+                // primer momento en que se le pagó algo — cualquier otro
+                // pago posterior de esa misma venta es un abono (típico de
+                // alguien completando lo que debe para certificarse).
+                const esAbono = m.venta_id != null && primerPagoDeVenta.get(m.venta_id) !== m.created_at;
                 return (
                   <tr key={m.id} className="border-b border-slate-100">
                     <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">
@@ -183,7 +216,20 @@ export default async function CierreCajaPage({
                     <td className="py-1.5 pr-2 font-medium text-slate-800 italic">
                       {venta ? clienteDe(venta.cliente_id) : m.concepto}
                     </td>
-                    <td className="py-1.5 pr-2 text-slate-500">{venta?.referido_nombre ?? "—"}</td>
+                    <td className="py-1.5 pr-2">
+                      {venta ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                            esAbono ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-indigo-700"
+                          }`}
+                        >
+                          {esAbono ? "Abono" : "Pago inicial"}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-2 text-slate-500">{venta ? referidoDe(venta) : "—"}</td>
                     <td className="py-1.5 pr-2 text-slate-500">
                       {m.metodo_pago ? (METODO_PAGO_LABEL[m.metodo_pago] ?? m.metodo_pago) : "—"}
                     </td>
@@ -195,7 +241,7 @@ export default async function CierreCajaPage({
               })}
               {ingresos.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-4 text-center text-slate-400">
+                  <td colSpan={6} className="py-4 text-center text-slate-400">
                     Sin ingresos en esta caja.
                   </td>
                 </tr>
@@ -204,7 +250,7 @@ export default async function CierreCajaPage({
             {ingresos.length > 0 ? (
               <tfoot>
                 <tr className="border-t-2 border-slate-800 font-semibold text-slate-900">
-                  <td colSpan={4} className="py-1.5 pr-2 text-right">
+                  <td colSpan={5} className="py-1.5 pr-2 text-right">
                     Total ingresos
                   </td>
                   <td className="py-1.5 pl-2 text-right">{formatCOP(totalIngresos)}</td>

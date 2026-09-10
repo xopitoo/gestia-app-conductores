@@ -12,11 +12,13 @@ export async function crearProducto(formData: FormData) {
   const descripcion = String(formData.get("descripcion") ?? "").trim() || null;
   const precio = Number(formData.get("precio") ?? 0);
   const categoria = (String(formData.get("categoria") ?? "") || null) as Categoria | null;
+  const sedeId = String(formData.get("sede_id") ?? "") || null;
 
   if (!nombre || !(precio >= 0)) return;
 
   await supabase.from("productos").insert({
     organization_id: profile.organization_id!,
+    sede_id: sedeId,
     nombre,
     descripcion,
     precio,

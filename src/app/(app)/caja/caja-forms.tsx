@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { abrirCaja, cerrarCaja, registrarEgreso, type CajaActionState } from "./actions";
-import { METODO_PAGO_LABEL } from "@/lib/supabase/types";
+import { METODO_PAGO_LABEL, METODO_PAGO_SELECCIONABLE } from "@/lib/supabase/types";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
@@ -94,9 +94,9 @@ export function RegistrarEgresoForm({
         className={inputClass}
       />
       <select name="metodo_pago" defaultValue="efectivo" className={inputClass}>
-        {Object.entries(METODO_PAGO_LABEL).map(([value, label]) => (
+        {METODO_PAGO_SELECCIONABLE.map((value) => (
           <option key={value} value={value}>
-            {label}
+            {METODO_PAGO_LABEL[value]}
           </option>
         ))}
       </select>

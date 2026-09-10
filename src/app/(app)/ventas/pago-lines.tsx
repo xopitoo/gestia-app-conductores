@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { formatCOP } from "@/lib/format";
-import { METODO_PAGO_LABEL, type MetodoPago, type VentaPagoInput } from "@/lib/supabase/types";
+import { METODO_PAGO_LABEL, METODO_PAGO_SELECCIONABLE, type MetodoPago, type VentaPagoInput } from "@/lib/supabase/types";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
@@ -30,7 +30,11 @@ export function PagoLines({
 
   const pagado = pagos.reduce((acc, p) => acc + (Number(p.monto) || 0), 0);
   const saldo = total - pagado;
-  const requierePin = allowPin && pagado > 0 && pagado < total * 0.5;
+  const requierePin = allowPin && pagado < total * 0.5;
+  // Solo al crear la venta (allowPin) tiene sentido dejarla sin ningún pago
+  // inicial (ej. el tramitador trae gente y paga al día siguiente) — un
+  // abono siempre necesita al menos un monto, si no no hay nada que registrar.
+  const puedeQuedarSinPagos = allowPin;
 
   function actualizar(i: number, field: keyof VentaPagoInput, value: string) {
     setPagos((prev) =>
@@ -55,7 +59,24 @@ export function PagoLines({
       <input type="hidden" name="pagos" value={JSON.stringify(pagos)} />
       {allowPin ? <input type="hidden" name="pin" value={pin} /> : null}
 
-      <span className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Pago</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Pago</span>
+        {puedeQuedarSinPagos && pagos.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setPagos([])}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700 hover:underline"
+          >
+            Sin pago inicial — queda pendiente
+          </button>
+        ) : null}
+      </div>
+
+      {pagos.length === 0 ? (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Se registra sin ningún pago inicial — queda totalmente pendiente.
+        </p>
+      ) : null}
 
       {pagos.map((p, i) => (
         <div key={i} className="grid grid-cols-[1fr_140px_auto] items-center gap-2">
@@ -64,9 +85,9 @@ export function PagoLines({
             onChange={(e) => actualizar(i, "metodo_pago", e.target.value)}
             className={inputClass}
           >
-            {Object.entries(METODO_PAGO_LABEL).map(([value, label]) => (
+            {METODO_PAGO_SELECCIONABLE.map((value) => (
               <option key={value} value={value}>
-                {label}
+                {METODO_PAGO_LABEL[value]}
               </option>
             ))}
           </select>
@@ -79,7 +100,7 @@ export function PagoLines({
             placeholder="Monto"
             className={inputClass}
           />
-          {pagos.length > 1 ? (
+          {pagos.length > 1 || puedeQuedarSinPagos ? (
             <button
               type="button"
               onClick={() => quitar(i)}

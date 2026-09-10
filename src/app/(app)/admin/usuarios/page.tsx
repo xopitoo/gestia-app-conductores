@@ -4,6 +4,7 @@ import { getViewerContext } from "@/lib/viewer";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { toggleUsuarioActive } from "./actions";
 import { UsuarioForm } from "./usuario-form";
+import { CambiarSedeSelect } from "./cambiar-sede-select";
 
 export const metadata: Metadata = { title: "Usuarios | Gestia App Conductores" };
 
@@ -17,8 +18,6 @@ export default async function UsuariosPage() {
     .eq("organization_id", profile.organization_id!)
     .order("full_name");
 
-  const sedeName = (id: string | null) =>
-    id ? (sedes.find((s) => s.id === id)?.name ?? "—") : "Pendiente de elegir";
   const roleLabel = (r: string) => (r === "admin" ? "Administrador" : "Recepcionista");
 
   return (
@@ -48,7 +47,11 @@ export default async function UsuariosPage() {
                   <td className="px-4 py-2.5 font-medium text-slate-800">{u.full_name}</td>
                   <td className="px-4 py-2.5 text-slate-600">{roleLabel(u.role)}</td>
                   <td className="px-4 py-2.5 text-slate-600">
-                    {u.role === "admin" ? "Todas" : sedeName(u.sede_id)}
+                    {u.role === "admin" ? (
+                      "Todas"
+                    ) : (
+                      <CambiarSedeSelect usuarioId={u.id} sedeActual={u.sede_id} sedes={sedes} />
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     <span

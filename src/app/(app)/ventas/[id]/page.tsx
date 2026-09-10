@@ -3,10 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, FileText, GraduationCap, Printer } from "lucide-react";
 import { getViewerContext } from "@/lib/viewer";
+import { getTramitadorSaldo } from "@/lib/tramitador-saldo";
 import { formatCOP, formatDateTime } from "@/lib/format";
 import { METODO_PAGO_LABEL } from "@/lib/supabase/types";
 import { AbonoForm } from "./abono-form";
 import { CertificadoRuntForm } from "./certificado-runt-form";
+import { CruceTramitadorForm } from "./cruce-tramitador-form";
 import { EditarMetodoPago } from "./editar-metodo-pago";
 import { RuntBadge } from "@/app/(app)/clientes/runt-badge";
 import { RuntConsultaLink } from "@/components/runt-link";
@@ -30,7 +32,7 @@ export default async function VentaDetailPage({
   const { data: venta } = await supabase
     .from("ventas")
     .select(
-      "id, sede_id, cliente_id, concepto, monto, descuento, estado, referido_nombre, certificado, certificado_at, certificado_path, created_at",
+      "id, sede_id, cliente_id, concepto, monto, descuento, estado, referido_nombre, tramitador_id, precio_tramitador, certificado, certificado_at, certificado_path, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -47,11 +49,11 @@ export default async function VentaDetailPage({
       ).data?.signedUrl
     : null;
 
-  const [{ data: items }, { data: pagos }, { data: cliente }, { data: sesionAbierta }] =
+  const [{ data: items }, { data: pagos }, { data: cliente }, { data: sesionAbierta }, { data: tramitador }] =
     await Promise.all([
       supabase
         .from("venta_items")
-        .select("id, nombre, precio")
+        .select("id, producto_id, nombre, precio")
         .eq("venta_id", id)
         .order("created_at"),
       supabase
@@ -70,12 +72,42 @@ export default async function VentaDetailPage({
         .eq("sede_id", venta.sede_id)
         .eq("estado", "abierta")
         .maybeSingle(),
+      venta.tramitador_id
+        ? supabase.from("tramitadores").select("nombre").eq("id", venta.tramitador_id).maybeSingle()
+        : Promise.resolve({ data: null }),
     ]);
+
+  const { data: tramitadorPrecios } = venta.tramitador_id
+    ? await supabase
+        .from("tramitador_precios")
+        .select("producto_id, precio_especial")
+        .eq("tramitador_id", venta.tramitador_id)
+    : { data: [] as { producto_id: string; precio_especial: number }[] };
 
   const pagado = (pagos ?? []).reduce((acc, p) => acc + p.monto, 0);
   const totalNeto = venta.monto - venta.descuento;
   const saldo = totalNeto - pagado;
   const estado = ESTADO_LABEL[venta.estado] ?? ESTADO_LABEL.pagada;
+
+  // Igual que en venta-form.tsx: solo los productos con precio puntual para
+  // este tramitador cuentan como "lo que él trajo" — si no hay ninguno con
+  // precio puntual, se asume que trajo toda la orden.
+  const itemsReferidos = (items ?? []).filter(
+    (item) => item.producto_id && (tramitadorPrecios ?? []).some((tp) => tp.producto_id === item.producto_id),
+  );
+  const baseReferida = itemsReferidos.length > 0 ? itemsReferidos : (items ?? []);
+  const montoReferido = baseReferida.reduce((acc, item) => acc + item.precio, 0);
+  const descuentoProporcional = venta.monto > 0 ? Math.round((venta.descuento * montoReferido) / venta.monto) : 0;
+  const montoReferidoNeto = montoReferido - descuentoProporcional;
+  const gananciaTramitador = Math.max(0, montoReferidoNeto - venta.precio_tramitador);
+  const hayItemsAjenos = montoReferido < venta.monto;
+
+  // Solo admin puede cruzar (cruzar_saldo_tramitador es admin-only), y solo
+  // tiene sentido calcularlo cuando de verdad podría usarse.
+  const tramitadorSaldo =
+    venta.tramitador_id && venta.estado === "abonada" && profile.role === "admin"
+      ? await getTramitadorSaldo(supabase, venta.tramitador_id)
+      : null;
 
   const puedeCorregirMetodoPago =
     venta.estado !== "anulada" &&
@@ -102,7 +134,13 @@ export default async function VentaDetailPage({
             <p className="mt-1 text-sm text-slate-500">
               {cliente?.tipo_documento} {cliente?.numero_documento} · {formatDateTime(venta.created_at)}
             </p>
-            {venta.referido_nombre ? (
+            {tramitador ? (
+              <p className="mt-1 text-xs text-indigo-600">
+                Tramitador: {tramitador.nombre} — precio especial {formatCOP(venta.precio_tramitador)}, ganancia
+                del tramitador {formatCOP(gananciaTramitador)} sobre {formatCOP(montoReferidoNeto)} (lo que él
+                trajo){hayItemsAjenos ? "; el resto de la orden no le corresponde a él" : ""}
+              </p>
+            ) : venta.referido_nombre ? (
               <p className="mt-1 text-xs text-indigo-600">Referido: {venta.referido_nombre}</p>
             ) : null}
           </div>
@@ -190,7 +228,15 @@ export default async function VentaDetailPage({
           </ul>
 
           {venta.estado === "abonada" ? (
-            <div className="mt-4 border-t border-slate-200 pt-4">
+            <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4">
+              {tramitadorSaldo !== null ? (
+                <CruceTramitadorForm
+                  ventaId={venta.id}
+                  tramitadorNombre={tramitador?.nombre ?? "Tramitador"}
+                  saldoPendienteVenta={saldo}
+                  saldoTramitador={tramitadorSaldo}
+                />
+              ) : null}
               {sesionAbierta ? (
                 <AbonoForm ventaId={venta.id} saldo={saldo} />
               ) : (

@@ -9,6 +9,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   GraduationCap,
+  Handshake,
   LayoutDashboard,
   LogOut,
   Package,
@@ -117,6 +118,9 @@ export function Sidebar({
             </NavLink>
             <NavLink href="/admin/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
               Clientes en mora
+            </NavLink>
+            <NavLink href="/admin/tramitadores" icon={<Handshake className="h-4.5 w-4.5" />} collapsed={collapsed}>
+              Tramitadores
             </NavLink>
             <NavLink href="/admin/certificados" icon={<GraduationCap className="h-4.5 w-4.5" />} collapsed={collapsed}>
               Certificados RUNT

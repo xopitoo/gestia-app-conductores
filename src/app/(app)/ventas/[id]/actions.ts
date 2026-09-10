@@ -82,6 +82,53 @@ export async function registrarAbono(
   return {};
 }
 
+export type CruceFormState = {
+  error?: string;
+};
+
+/**
+ * Salda una venta pendiente de un tramitador contra su saldo a favor, sin
+ * que entre plata real a la caja — para cuando trae gente y paga después,
+ * y para entonces ya le quedó plata de sobra de otras ventas suyas. Solo
+ * admin (mismo criterio que un pago directo al tramitador).
+ */
+export async function cruzarSaldoTramitador(
+  _prevState: CruceFormState,
+  formData: FormData,
+): Promise<CruceFormState> {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") {
+    return { error: "No autorizado." };
+  }
+
+  const ventaId = String(formData.get("venta_id") ?? "");
+  const monto = Number(formData.get("monto") ?? 0);
+
+  if (!ventaId || !(monto > 0)) {
+    return { error: "Ingresá un monto válido." };
+  }
+
+  const { error } = await supabase.rpc("cruzar_saldo_tramitador", {
+    p_venta_id: ventaId,
+    p_monto: monto,
+  });
+
+  if (error) {
+    if (error.message.includes("saldo pendiente de la venta")) {
+      return { error: "El monto supera el saldo pendiente de la venta." };
+    }
+    if (error.message.includes("saldo a favor")) {
+      return { error: "El tramitador no tiene suficiente saldo a favor para cruzar ese monto." };
+    }
+    return { error: "No se pudo cruzar el saldo." };
+  }
+
+  revalidatePath(`/ventas/${ventaId}`);
+  revalidatePath("/ventas");
+  revalidatePath("/admin/tramitadores");
+  return {};
+}
+
 export type CertificadoFormState = {
   error?: string;
 };

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getViewerContext, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
-import { formatCOP, formatDateTime } from "@/lib/format";
+import { formatCOP } from "@/lib/format";
 import { DescuentoForm } from "./descuento-form";
 
 export const metadata: Metadata = { title: "Clientes en mora | Gestia App Conductores" };
@@ -16,7 +16,6 @@ type Fila = {
   descuento: number;
   pagado: number;
   saldo: number;
-  createdAt: string;
 };
 
 export default async function MoraPage({
@@ -72,7 +71,6 @@ export default async function MoraPage({
       descuento: v.descuento,
       pagado,
       saldo,
-      createdAt: v.created_at,
     });
     entry.totalSaldo += saldo;
     porCliente.set(v.cliente_id, entry);
@@ -109,14 +107,14 @@ export default async function MoraPage({
           No hay clientes en mora en este momento.
         </div>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           {filasClientes.map((c) => {
             const cliente = clienteInfo(c.clienteId);
             return (
-              <div key={c.clienteId} className="rounded-2xl border border-slate-200 bg-white p-5">
+              <div key={c.clienteId} className="rounded-xl border border-slate-200 bg-white p-3.5">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="truncate font-semibold text-slate-900">
+                    <h3 className="truncate text-sm font-semibold text-slate-900">
                       {cliente?.nombre_completo ?? "Cliente"}
                     </h3>
                     <p className="text-xs text-slate-500">
@@ -124,40 +122,33 @@ export default async function MoraPage({
                       {cliente?.telefono ? ` · ${cliente.telefono_pais} ${cliente.telefono}` : ""}
                     </p>
                   </div>
-                  <span className="shrink-0 text-lg font-semibold text-amber-600">
+                  <span className="shrink-0 text-base font-semibold text-amber-600">
                     {formatCOP(c.totalSaldo)}
                   </span>
                 </div>
 
-                <ul className="mt-4 flex flex-col divide-y divide-slate-100">
+                <ul className="mt-1.5 flex flex-col divide-y divide-slate-100">
                   {c.filas.map((f) => (
                     <li
                       key={f.ventaId}
-                      className="flex flex-col gap-3 py-3 sm:flex-row sm:items-start sm:justify-between"
+                      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 text-xs"
                     >
                       <div className="min-w-0">
-                        <Link
-                          href={`/ventas/${f.ventaId}`}
-                          className="text-sm font-medium text-indigo-700 hover:underline"
-                        >
+                        <Link href={`/ventas/${f.ventaId}`} className="font-medium text-indigo-700 hover:underline">
                           {f.concepto}
                         </Link>
-                        <p className="text-xs text-slate-400">
-                          {sedeName(f.sedeId)} · {formatDateTime(f.createdAt)}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Pagado {formatCOP(f.pagado)} de {formatCOP(f.monto - f.descuento)}
-                          {f.descuento > 0 ? ` (descuento actual: ${formatCOP(f.descuento)})` : ""}
-                        </p>
+                        <span className="text-slate-400"> · {sedeName(f.sedeId)}</span>
+                        <span className="text-slate-500">
+                          {" "}
+                          · Pagado {formatCOP(f.pagado)} de {formatCOP(f.monto - f.descuento)}
+                        </span>
                       </div>
-                      <div className="shrink-0">
-                        <DescuentoForm
-                          ventaId={f.ventaId}
-                          montoBruto={f.monto}
-                          pagado={f.pagado}
-                          descuentoActual={f.descuento}
-                        />
-                      </div>
+                      <DescuentoForm
+                        ventaId={f.ventaId}
+                        montoBruto={f.monto}
+                        pagado={f.pagado}
+                        descuentoActual={f.descuento}
+                      />
                     </li>
                   ))}
                 </ul>
