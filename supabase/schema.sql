@@ -355,7 +355,7 @@ create table if not exists public.venta_pagos (
   organization_id uuid not null references public.organizations (id) on delete cascade,
   sede_id uuid not null references public.sedes (id) on delete restrict,
   monto numeric(12, 2) not null check (monto > 0),
-  metodo_pago text not null check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'otro', 'cruce_tramitador')),
+  metodo_pago text not null check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro', 'cruce_tramitador')),
   created_by uuid not null references public.profiles (id),
   created_at timestamptz not null default now()
 );
@@ -366,7 +366,7 @@ create table if not exists public.venta_pagos (
 alter table public.venta_pagos drop constraint if exists venta_pagos_metodo_pago_check;
 alter table public.venta_pagos
   add constraint venta_pagos_metodo_pago_check
-  check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'otro', 'cruce_tramitador'));
+  check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro', 'cruce_tramitador'));
 
 -- Rastro de auditoría de corregir_forma_pago_venta (más abajo) — venta_pagos
 -- sigue siendo un registro inmutable para todo lo demás (monto, venta_id,
@@ -374,10 +374,50 @@ alter table public.venta_pagos
 -- quién y cuándo, para no perder trazabilidad en un sistema de dinero.
 alter table public.venta_pagos add column if not exists metodo_pago_editado_por uuid references public.profiles (id);
 alter table public.venta_pagos add column if not exists metodo_pago_editado_at timestamptz;
+-- Foto/captura del comprobante (transferencia, Nequi, Addi, Brilla,
+-- Sistecrédito, etc.) — opcional, en el bucket privado
+-- `comprobantes-pago`. Se completa al crear el pago (ver
+-- registrar_venta/registrar_abono/registrar_abono_tramitador/
+-- convertir_cotizacion): venta_pagos es inmutable, así que esto entra ya
+-- con el insert, no se agrega después.
+alter table public.venta_pagos add column if not exists comprobante_path text;
 
 create index if not exists venta_pagos_venta_id_idx on public.venta_pagos (venta_id);
 create index if not exists venta_pagos_organization_id_idx on public.venta_pagos (organization_id);
 create index if not exists venta_pagos_sede_id_idx on public.venta_pagos (sede_id);
+
+-- =========================================================
+-- Bucket privado para los comprobantes de pago (transferencia, Nequi,
+-- Addi, Brilla, Sistecrédito, etc.) — nunca público, se accede siempre con
+-- signed URLs de corta duración generadas en el servidor. A diferencia de
+-- certificados-runt, la ruta acá es "<organization_id>/<uuid>.<ext>" (no
+-- "<org>/<venta_id>/...") porque el pago se sube ANTES de que exista la
+-- venta en algunos casos (registrar_venta crea todo en una sola
+-- transacción) — el vínculo real vive en venta_pagos.comprobante_path,
+-- no en la ruta del archivo. Solo INSERT y SELECT: como el resto de los
+-- registros de pago, es de una sola vía.
+-- =========================================================
+insert into storage.buckets (id, name, public)
+values ('comprobantes-pago', 'comprobantes-pago', false)
+on conflict (id) do nothing;
+
+drop policy if exists "comprobantes_pago_insert" on storage.objects;
+create policy "comprobantes_pago_insert" on storage.objects
+  for insert
+  with check (
+    bucket_id = 'comprobantes-pago'
+    and (storage.foldername(name))[1] = public.current_org_id()::text
+    and public.current_role() in ('admin', 'recepcionista')
+  );
+
+drop policy if exists "comprobantes_pago_select" on storage.objects;
+create policy "comprobantes_pago_select" on storage.objects
+  for select
+  using (
+    bucket_id = 'comprobantes-pago'
+    and (storage.foldername(name))[1] = public.current_org_id()::text
+    and public.current_role() in ('admin', 'recepcionista')
+  );
 
 -- =========================================================
 -- COTIZACIONES (borrador de una venta: mismo cliente + productos, sin
@@ -484,7 +524,16 @@ alter table public.caja_movimientos add column if not exists venta_pago_id uuid 
 alter table public.caja_movimientos drop constraint if exists caja_movimientos_metodo_pago_check;
 alter table public.caja_movimientos
   add constraint caja_movimientos_metodo_pago_check
-  check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'otro'));
+  check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro'));
+
+-- Mismo criterio que venta_pago_id: liga el movimiento de caja al pago del
+-- tramitador que lo generó — un ingreso cuando el tramitador paga lo que
+-- debe (registrar_abono_tramitador), un egreso cuando la organización le
+-- paga su comisión (registrar_comision_tramitador). Nullable: la mayoría
+-- de los movimientos no vienen de un tramitador.
+alter table public.caja_movimientos add column if not exists tramitador_id uuid references public.tramitadores (id) on delete set null;
+alter table public.caja_movimientos add column if not exists tramitador_pago_id uuid references public.tramitador_pagos (id) on delete set null;
+create index if not exists caja_movimientos_tramitador_id_idx on public.caja_movimientos (tramitador_id);
 
 create index if not exists caja_movimientos_caja_sesion_id_idx on public.caja_movimientos (caja_sesion_id);
 create index if not exists caja_movimientos_organization_id_idx on public.caja_movimientos (organization_id);
@@ -839,10 +888,10 @@ begin
 
   for v_pago in select * from jsonb_array_elements(p_pagos)
   loop
-    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
     values (
       v_venta.id, v_org_id, p_sede_id,
-      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', auth.uid()
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
     )
     returning id into v_pago_id;
 
@@ -913,10 +962,10 @@ begin
 
   for v_pago in select * from jsonb_array_elements(p_pagos)
   loop
-    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
     values (
       p_venta_id, v_venta.organization_id, v_venta.sede_id,
-      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', auth.uid()
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
     )
     returning id into v_pago_id;
 
@@ -995,22 +1044,12 @@ begin
     raise exception 'El monto supera el saldo pendiente de la venta';
   end if;
 
-  select
-    coalesce((
-      select sum(vp.monto)
-      from public.venta_pagos vp
-      join public.ventas v2 on v2.id = vp.venta_id
-      where v2.tramitador_id = v_venta.tramitador_id and v2.estado <> 'anulada'
-    ), 0)
-    - coalesce((
-      select sum(v2.precio_tramitador)
-      from public.ventas v2
-      where v2.tramitador_id = v_venta.tramitador_id and v2.estado <> 'anulada'
-    ), 0)
-    - coalesce((
-      select sum(monto) from public.tramitador_pagos where tramitador_id = v_venta.tramitador_id
-    ), 0)
-  into v_saldo_tramitador;
+  -- Mismo cálculo que tramitadores_saldo (no uno propio aparte que pueda
+  -- divergir) — ver esa función para el criterio completo.
+  select coalesce(saldo_a_favor, 0) into v_saldo_tramitador
+  from public.tramitadores_saldo(null)
+  where id = v_venta.tramitador_id;
+  v_saldo_tramitador := coalesce(v_saldo_tramitador, 0);
 
   if p_monto > v_saldo_tramitador then
     raise exception 'El tramitador no tiene suficiente saldo a favor para cruzar ese monto';
@@ -1033,6 +1072,508 @@ begin
     then 'pagada' else 'abonada'
   end
   where id = v_venta.id
+  returning * into v_venta;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- REGISTRAR_ABONO_TRAMITADOR: cuando el tramitador (no el cliente) es
+-- quien salda lo que debe — ej. trajo 5 personas en el día, ninguna pagó
+-- en el momento, y al cierre él paga los $700.000 acumulados de una vez.
+--
+-- Paso 1 (nuevo): si el tramitador ya tiene saldo a favor (le debíamos
+-- plata, ej. por comisión de otras ventas), se aplica automáticamente
+-- contra sus ventas 'abonada' de esta sede ANTES de pedir efectivo nuevo
+-- — mismo mecanismo que cruzar_saldo_tramitador (venta_pagos
+-- 'cruce_tramitador' + tramitador_pagos, sin caja_movimientos porque no
+-- es plata real), pero recorriendo todas sus ventas pendientes de la
+-- sede en vez de una sola. Así, si le debíamos 200.000 y ahora debe
+-- 230.000, solo hacen falta 30.000 en efectivo nuevo.
+--
+-- Paso 2: lo que quede pendiente después del cruce se cubre con p_pagos
+-- (efectivo real, entra a caja) — reparte entre sus ventas 'abonada' de
+-- esa sede, de la más vieja a la más nueva, insertando un venta_pagos (y
+-- su caja_movimientos 'ingreso' correspondiente) por cada venta que
+-- alcanza a cubrir, hasta agotar el monto. Si el pago no alcanza a
+-- cubrir todo, la última venta tocada queda parcialmente abonada; si el
+-- pago supera lo que queda pendiente en esa sede, rechaza. p_pagos puede
+-- venir vacío si el cruce del paso 1 ya cubrió todo.
+--
+-- security invoker (como registrar_abono): cada insert queda sujeto a la
+-- RLS normal de quien llama, así un recepcionista solo puede aplicar esto
+-- a su propia sede.
+-- =========================================================
+drop function if exists public.registrar_abono_tramitador(uuid, uuid, jsonb);
+create or replace function public.registrar_abono_tramitador(
+  p_tramitador_id uuid,
+  p_sede_id uuid,
+  p_pagos jsonb
+)
+returns table (total_cruzado numeric, total_efectivo numeric)
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_tramitador public.tramitadores;
+  v_sesion_id uuid;
+  v_pago jsonb;
+  v_restante numeric(12, 2);
+  v_venta record;
+  v_pendiente_venta numeric(12, 2);
+  v_allocar numeric(12, 2);
+  v_pago_id uuid;
+  v_total_efectivo numeric(12, 2) := 0;
+  v_total_cruzado numeric(12, 2) := 0;
+  v_saldo_tramitador numeric(12, 2);
+  v_cliente_nombre text;
+begin
+  if p_pagos is null or jsonb_typeof(p_pagos) <> 'array' then
+    raise exception 'Formato de pagos inválido';
+  end if;
+
+  select * into v_tramitador from public.tramitadores where id = p_tramitador_id;
+  if v_tramitador.id is null or v_tramitador.organization_id is distinct from public.current_org_id() then
+    raise exception 'Tramitador no encontrado';
+  end if;
+
+  select id into v_sesion_id from public.caja_sesiones
+    where sede_id = p_sede_id and estado = 'abierta';
+  if v_sesion_id is null then
+    raise exception 'Debe abrir caja antes de registrar el abono';
+  end if;
+
+  -- Paso 1: cruzar automáticamente el saldo a favor existente.
+  select coalesce(saldo_a_favor, 0) into v_saldo_tramitador
+  from public.tramitadores_saldo(null)
+  where id = p_tramitador_id;
+  v_saldo_tramitador := greatest(coalesce(v_saldo_tramitador, 0), 0);
+
+  if v_saldo_tramitador > 0 then
+    for v_venta in
+      select v.id, v.monto, v.descuento, v.sede_id, v.cliente_id
+      from public.ventas v
+      where v.tramitador_id = p_tramitador_id
+        and v.sede_id = p_sede_id
+        and v.estado = 'abonada'
+      order by v.created_at asc
+      for update
+    loop
+      exit when v_saldo_tramitador <= 0;
+
+      select (v_venta.monto - v_venta.descuento) - coalesce(sum(monto), 0) into v_pendiente_venta
+        from public.venta_pagos where venta_id = v_venta.id;
+      if v_pendiente_venta <= 0 then
+        continue;
+      end if;
+
+      v_allocar := least(v_saldo_tramitador, v_pendiente_venta);
+
+      select nombre_completo into v_cliente_nombre from public.clientes where id = v_venta.cliente_id;
+
+      insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
+      values (v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, 'cruce_tramitador', auth.uid());
+
+      insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, created_by)
+      values (
+        p_tramitador_id, v_tramitador.organization_id, p_sede_id, v_allocar,
+        'Cruce automático con venta de ' || coalesce(v_cliente_nombre, 'cliente'), auth.uid()
+      );
+
+      update public.ventas
+      set estado = case
+        when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento)
+        then 'pagada' else 'abonada'
+      end
+      where id = v_venta.id;
+
+      v_saldo_tramitador := v_saldo_tramitador - v_allocar;
+      v_total_cruzado := v_total_cruzado + v_allocar;
+    end loop;
+  end if;
+
+  -- Paso 2: lo que siga pendiente se cubre con efectivo nuevo (p_pagos).
+  if jsonb_array_length(p_pagos) > 0 then
+    for v_pago in select * from jsonb_array_elements(p_pagos)
+    loop
+      v_restante := (v_pago ->> 'monto')::numeric;
+      if v_restante is null or v_restante <= 0 then
+        continue;
+      end if;
+
+      for v_venta in
+        select v.id, v.monto, v.descuento, v.sede_id
+        from public.ventas v
+        where v.tramitador_id = p_tramitador_id
+          and v.sede_id = p_sede_id
+          and v.estado = 'abonada'
+        order by v.created_at asc
+        for update
+      loop
+        exit when v_restante <= 0;
+
+        select (v_venta.monto - v_venta.descuento) - coalesce(sum(monto), 0) into v_pendiente_venta
+          from public.venta_pagos where venta_id = v_venta.id;
+        if v_pendiente_venta <= 0 then
+          continue;
+        end if;
+
+        v_allocar := least(v_restante, v_pendiente_venta);
+
+        insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
+        values (
+          v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, v_pago ->> 'metodo_pago',
+          nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
+        )
+        returning id into v_pago_id;
+
+        insert into public.caja_movimientos (
+          caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago,
+          venta_id, venta_pago_id, tramitador_id, created_by
+        )
+        values (
+          v_sesion_id, v_tramitador.organization_id, p_sede_id, 'ingreso',
+          'Abono de ' || v_tramitador.nombre, v_allocar, v_pago ->> 'metodo_pago',
+          v_venta.id, v_pago_id, p_tramitador_id, auth.uid()
+        );
+
+        update public.ventas
+        set estado = case
+          when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento)
+          then 'pagada' else 'abonada'
+        end
+        where id = v_venta.id;
+
+        v_restante := v_restante - v_allocar;
+        v_total_efectivo := v_total_efectivo + v_allocar;
+      end loop;
+
+      if v_restante > 0 then
+        raise exception 'El pago supera lo que debe el tramitador en esta sede';
+      end if;
+    end loop;
+  end if;
+
+  if v_total_cruzado = 0 and v_total_efectivo = 0 then
+    raise exception 'Debe registrar al menos un pago';
+  end if;
+
+  return query select v_total_cruzado, v_total_efectivo;
+end;
+$$;
+
+-- =========================================================
+-- REGISTRAR_COMISION_TRAMITADOR: la organización le paga al tramitador lo
+-- que le corresponde (su saldo a favor) — a diferencia del pago directo
+-- anterior (que solo dejaba constancia en tramitador_pagos, sin tocar
+-- caja), esto SÍ es plata real que sale de la caja, así que también
+-- inserta un caja_movimientos 'egreso' — afecta el cierre del día.
+-- =========================================================
+drop function if exists public.registrar_comision_tramitador(uuid, uuid, numeric, text, text);
+create or replace function public.registrar_comision_tramitador(
+  p_tramitador_id uuid,
+  p_sede_id uuid,
+  p_monto numeric,
+  p_metodo_pago text,
+  p_nota text default null
+)
+returns public.tramitador_pagos
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_tramitador public.tramitadores;
+  v_sesion_id uuid;
+  v_saldo numeric(12, 2);
+  v_pago public.tramitador_pagos;
+begin
+  if p_monto is null or p_monto <= 0 then
+    raise exception 'Ingresá un monto válido';
+  end if;
+
+  select * into v_tramitador from public.tramitadores where id = p_tramitador_id;
+  if v_tramitador.id is null or v_tramitador.organization_id is distinct from public.current_org_id() then
+    raise exception 'Tramitador no encontrado';
+  end if;
+
+  select id into v_sesion_id from public.caja_sesiones
+    where sede_id = p_sede_id and estado = 'abierta';
+  if v_sesion_id is null then
+    raise exception 'Debe abrir caja antes de pagar la comisión';
+  end if;
+
+  select coalesce(saldo_a_favor, 0) into v_saldo
+  from public.tramitadores_saldo(null)
+  where id = p_tramitador_id;
+  v_saldo := coalesce(v_saldo, 0);
+
+  if p_monto > v_saldo then
+    raise exception 'El tramitador no tiene suficiente saldo a favor';
+  end if;
+
+  insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, created_by)
+  values (p_tramitador_id, v_tramitador.organization_id, p_sede_id, p_monto, p_nota, auth.uid())
+  returning * into v_pago;
+
+  insert into public.caja_movimientos (
+    caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago,
+    tramitador_id, tramitador_pago_id, created_by
+  )
+  values (
+    v_sesion_id, v_tramitador.organization_id, p_sede_id, 'egreso',
+    'Comisión ' || v_tramitador.nombre, p_monto, p_metodo_pago,
+    p_tramitador_id, v_pago.id, auth.uid()
+  );
+
+  return v_pago;
+end;
+$$;
+
+-- =========================================================
+-- TRAMITADORES_SALDO: el saldo a favor de cada tramitador activo visible en
+-- una sede (mismo criterio que el picker de venta-form: sede_id null =
+-- todas las sedes, o puntual). p_sede_id en null significa "todas las
+-- sedes sin filtrar" (lo usa /admin/tramitadores, que ve el catálogo
+-- completo) — no confundir con tramitadores.sede_id null, que es un
+-- tramitador global visible desde cualquier sede.
+--
+-- Existe porque tramitador_pagos es de solo lectura para admin
+-- (tramitador_pagos_select_admin) — un recepcionista no puede leer esa
+-- tabla directo, así que el resumen "Valores pendientes" del dashboard
+-- (que sí necesita ver un recepcionista) daba un saldo inflado: nunca
+-- restaba lo que ya se le había pagado al tramitador. Esta función corre
+-- con privilegios elevados (security definer) para calcular el número,
+-- pero solo devuelve el saldo neto y sus componentes — nunca los pagos en
+-- sí, así que no se filtra nada de lo que se quiso mantener admin-only.
+--
+-- Una venta sin tramitador de margen (precio cobrado = precio especial)
+-- que queda pagada no le genera crédito NI deuda al tramitador — su pago
+-- simplemente cancela lo que se le debía cobrar. Solo cuando el precio
+-- cobrado supera el precio especial (ganancia real) se acredita esa
+-- diferencia a su favor una vez que efectivamente se cobra. Si la venta
+-- queda SIN pagar, en cambio, el total completo cuenta como deuda suya —
+-- así traiga además un producto que no tiene nada que ver con él (ej.
+-- una impresión): si el cliente no paga, la organización se lo cobra a
+-- él, no al cliente. Por eso "reclamo" (monto neto menos su ganancia
+-- potencial) SÍ se resta completo cuando no hay pago, pero al pagarse
+-- queda saldado por el mismo monto que entra como "pagado_clientes" —
+-- nunca de más ("pagar lo que debe" debe dejarlo en $0, no en crédito a
+-- su favor).
+-- =========================================================
+drop function if exists public.tramitadores_saldo(uuid);
+create or replace function public.tramitadores_saldo(p_sede_id uuid default null)
+returns table (
+  id uuid,
+  nombre text,
+  pagado_clientes numeric,
+  reclamo numeric,
+  pagado_tramitador numeric,
+  saldo_a_favor numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return query
+  select
+    t.id,
+    t.nombre,
+    coalesce(v_sum.pagado_clientes, 0) as pagado_clientes,
+    coalesce(v_sum.reclamo, 0) as reclamo,
+    coalesce(tp_sum.pagado_tramitador, 0) as pagado_tramitador,
+    coalesce(v_sum.pagado_clientes, 0) - coalesce(v_sum.reclamo, 0) - coalesce(tp_sum.pagado_tramitador, 0) as saldo_a_favor
+  from public.tramitadores t
+  left join lateral (
+    select sum(vs.pagado) as pagado_clientes, sum(vs.reclamo) as reclamo
+    from (
+      select
+        coalesce(pagos.pagado, 0) as pagado,
+        (v.monto - v.descuento) - greatest(
+          0,
+          (
+            referidos.monto_referido
+            - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
+          ) - v.precio_tramitador
+        ) as reclamo
+      from public.ventas v
+      left join lateral (
+        select case
+          when count(*) > 0 then sum(vi.precio)
+          else v.monto
+        end as monto_referido
+        from public.venta_items vi
+        where vi.venta_id = v.id
+          and vi.producto_id in (select tp.producto_id from public.tramitador_precios tp where tp.tramitador_id = t.id)
+      ) referidos on true
+      left join lateral (
+        select coalesce(sum(vp.monto), 0) as pagado
+        from public.venta_pagos vp
+        where vp.venta_id = v.id
+      ) pagos on true
+      where v.tramitador_id = t.id and v.estado <> 'anulada'
+    ) vs
+  ) v_sum on true
+  left join lateral (
+    select sum(tp.monto) as pagado_tramitador
+    from public.tramitador_pagos tp
+    where tp.tramitador_id = t.id
+  ) tp_sum on true
+  where t.active = true
+    and t.organization_id = public.current_org_id()
+    and (p_sede_id is null or t.sede_id is null or t.sede_id = p_sede_id)
+  order by t.nombre;
+end;
+$$;
+
+-- =========================================================
+-- TRAMITADOR_EXTRACTO: el detalle cronológico (tipo extracto bancario) de
+-- cómo se armó el saldo de UN tramitador — una fila por cada venta suya
+-- (con su aporte neto, mismo criterio de tramitadores_saldo: solo su
+-- ganancia real cuenta como crédito, lo pendiente cuenta como deuda
+-- completa) y una fila por cada pago que ya se le hizo a él (siempre en
+-- contra, resta del saldo), ambas con un saldo acumulado corrido — para
+-- responder "¿de dónde salió este número?" sin tener que hacer la cuenta
+-- a mano.
+--
+-- security definer por el mismo motivo que tramitadores_saldo: necesita
+-- leer tramitador_pagos aunque quien pregunte sea un recepcionista, y
+-- mostrar SIEMPRE el cuadre completo (todas las sedes de este tramitador)
+-- para que el número final coincida exactamente con el que ya se ve en el
+-- resumen — no una versión recortada a la sede de quien mira.
+-- =========================================================
+drop function if exists public.tramitador_extracto(uuid);
+create or replace function public.tramitador_extracto(p_tramitador_id uuid)
+returns table (
+  fecha timestamptz,
+  tipo text,
+  referencia_id uuid,
+  descripcion text,
+  monto numeric,
+  pagado numeric,
+  total numeric,
+  saldo_acumulado numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.tramitadores t
+    where t.id = p_tramitador_id and t.organization_id = public.current_org_id()
+  ) then
+    return;
+  end if;
+
+  return query
+  with eventos as (
+    select
+      v.created_at as fecha,
+      'venta'::text as tipo,
+      v.id as referencia_id,
+      coalesce(c.nombre_completo, 'Cliente') as descripcion,
+      (
+        coalesce(pagos.pagado, 0) - (
+          (v.monto - v.descuento) - greatest(
+            0,
+            (
+              referidos.monto_referido
+              - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
+            ) - v.precio_tramitador
+          )
+        )
+      ) as monto,
+      coalesce(pagos.pagado, 0) as pagado,
+      (v.monto - v.descuento) as total
+    from public.ventas v
+    left join public.clientes c on c.id = v.cliente_id
+    left join lateral (
+      select case
+        when count(*) > 0 then sum(vi.precio)
+        else v.monto
+      end as monto_referido
+      from public.venta_items vi
+      where vi.venta_id = v.id
+        and vi.producto_id in (select tp.producto_id from public.tramitador_precios tp where tp.tramitador_id = p_tramitador_id)
+    ) referidos on true
+    left join lateral (
+      select coalesce(sum(vp.monto), 0) as pagado
+      from public.venta_pagos vp
+      where vp.venta_id = v.id
+    ) pagos on true
+    where v.tramitador_id = p_tramitador_id and v.estado <> 'anulada'
+
+    union all
+
+    select
+      tp.created_at as fecha,
+      'pago_tramitador'::text as tipo,
+      tp.id as referencia_id,
+      coalesce(tp.nota, 'Pago al tramitador') as descripcion,
+      -tp.monto as monto,
+      null::numeric as pagado,
+      null::numeric as total
+    from public.tramitador_pagos tp
+    where tp.tramitador_id = p_tramitador_id
+  )
+  select
+    e.fecha,
+    e.tipo,
+    e.referencia_id,
+    e.descripcion,
+    e.monto,
+    e.pagado,
+    e.total,
+    sum(e.monto) over (order by e.fecha rows between unbounded preceding and current row) as saldo_acumulado
+  from eventos e
+  order by e.fecha;
+end;
+$$;
+
+-- =========================================================
+-- CORREGIR_PRECIO_TRAMITADOR_VENTA: corrige el precio especial (lo que le
+-- corresponde a la organización) de una venta ya creada — antes no existía
+-- ninguna forma de arreglar esto si quedaba mal cargado (ej. el campo se
+-- editó a mano por error y quedó en $0), solo se podía ver, nunca corregir.
+-- Admin-only, mismo criterio que corregir_forma_pago_venta.
+-- =========================================================
+create or replace function public.corregir_precio_tramitador_venta(
+  p_venta_id uuid,
+  p_precio_tramitador numeric
+)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+begin
+  if public.current_role() <> 'admin' then
+    raise exception 'Solo un administrador puede corregir el precio del tramitador';
+  end if;
+  if p_precio_tramitador is null or p_precio_tramitador < 0 then
+    raise exception 'El precio del tramitador no puede ser negativo';
+  end if;
+
+  select * into v_venta from public.ventas where id = p_venta_id;
+  if v_venta.id is null or v_venta.organization_id is distinct from public.current_org_id() then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.tramitador_id is null then
+    raise exception 'Esta venta no tiene un tramitador asociado';
+  end if;
+  if p_precio_tramitador > (v_venta.monto - v_venta.descuento) then
+    raise exception 'El precio del tramitador no puede superar el total de la orden';
+  end if;
+
+  update public.ventas
+  set precio_tramitador = p_precio_tramitador
+  where id = p_venta_id
   returning * into v_venta;
 
   return v_venta;
@@ -1096,7 +1637,7 @@ begin
     raise exception 'No autorizado';
   end if;
 
-  if p_metodo_pago not in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'otro') then
+  if p_metodo_pago not in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro') then
     raise exception 'Forma de pago inválida';
   end if;
 
@@ -1431,10 +1972,10 @@ begin
 
   for v_pago in select * from jsonb_array_elements(p_pagos)
   loop
-    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
     values (
       v_venta.id, v_cot.organization_id, v_cot.sede_id,
-      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', auth.uid()
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
     )
     returning id into v_pago_id;
 
@@ -1709,16 +2250,34 @@ create policy "tramitadores_update_admin" on public.tramitadores
   using (public.current_role() = 'admin' and organization_id = public.current_org_id())
   with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
 
--- tramitador_pagos: exclusivo de admin — es una cuenta por pagar a un
--- tercero externo, no algo que un recepcionista deba ver ni tocar. Solo
--- select + insert (inmutable, igual que venta_pagos/caja_movimientos).
+-- tramitador_pagos: admin ve/paga cualquiera, org-wide. Un recepcionista
+-- también puede ver y registrar pagos, pero solo a los tramitadores de su
+-- propia sede (o a los globales, sede_id null) — igual que ya puede
+-- elegirlos al registrar una venta. Nunca puede editar/borrar (inmutable,
+-- igual que venta_pagos/caja_movimientos).
 drop policy if exists "tramitador_pagos_select_admin" on public.tramitador_pagos;
 create policy "tramitador_pagos_select_admin" on public.tramitador_pagos
   for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
 
+drop policy if exists "tramitador_pagos_select_recepcionista" on public.tramitador_pagos;
+create policy "tramitador_pagos_select_recepcionista" on public.tramitador_pagos
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and (sede_id is null or sede_id = public.current_sede_id())
+  );
+
 drop policy if exists "tramitador_pagos_insert_admin" on public.tramitador_pagos;
 create policy "tramitador_pagos_insert_admin" on public.tramitador_pagos
   for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "tramitador_pagos_insert_recepcionista" on public.tramitador_pagos;
+create policy "tramitador_pagos_insert_recepcionista" on public.tramitador_pagos
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and (sede_id is null or sede_id = public.current_sede_id())
+  );
 
 -- tramitador_precios: select org-wide (un recepcionista necesita leerlos
 -- para que la venta precargue el precio correcto); insert/update/delete

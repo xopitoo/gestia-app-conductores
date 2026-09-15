@@ -108,6 +108,8 @@ export type MetodoPago =
   | "nequi"
   | "addi"
   | "credito"
+  | "brilla"
+  | "sistecredito"
   | "otro"
   | "cruce_tramitador";
 
@@ -118,6 +120,8 @@ export const METODO_PAGO_LABEL: Record<MetodoPago, string> = {
   nequi: "Nequi",
   addi: "Addi",
   credito: "Crédito",
+  brilla: "Brilla",
+  sistecredito: "Sistecrédito",
   otro: "Otro",
   cruce_tramitador: "Cruce con tramitador",
 };
@@ -132,7 +136,20 @@ export const METODO_PAGO_SELECCIONABLE: MetodoPago[] = [
   "nequi",
   "addi",
   "credito",
+  "brilla",
+  "sistecredito",
   "otro",
+];
+
+/** Métodos donde tiene sentido pedir una foto/captura del comprobante como
+ * respaldo (transferencias y plataformas de pago/financiación externas) —
+ * no obligatorio, pero se ofrece el botón para adjuntarla. */
+export const METODO_PAGO_CON_COMPROBANTE: MetodoPago[] = [
+  "transferencia",
+  "nequi",
+  "addi",
+  "brilla",
+  "sistecredito",
 ];
 export type EstadoVenta = "pagada" | "abonada" | "anulada";
 export type DescuentoTipo = "porcentaje" | "fijo";
@@ -207,6 +224,8 @@ export type VentaPagoRow = {
   metodo_pago: MetodoPago;
   metodo_pago_editado_por: string | null;
   metodo_pago_editado_at: string | null;
+  /** Ruta del comprobante (foto/captura) en el bucket privado `comprobantes-pago`, si se adjuntó uno. */
+  comprobante_path: string | null;
   created_by: string;
   created_at: string;
 };
@@ -215,6 +234,7 @@ export type VentaPagoRow = {
 export type VentaPagoInput = {
   monto: number;
   metodo_pago: MetodoPago;
+  comprobante_path?: string | null;
 };
 
 export type EstadoCotizacion = "pendiente" | "convertida" | "rechazada";
@@ -341,9 +361,51 @@ export type Database = {
         { p_venta_id: string; p_monto: number },
         VentaRow
       >;
+      registrar_abono_tramitador: FunctionDef<
+        { p_tramitador_id: string; p_sede_id: string; p_pagos: VentaPagoInput[] },
+        { total_cruzado: number; total_efectivo: number }[]
+      >;
+      registrar_comision_tramitador: FunctionDef<
+        {
+          p_tramitador_id: string;
+          p_sede_id: string;
+          p_monto: number;
+          p_metodo_pago: MetodoPago;
+          p_nota: string | null;
+        },
+        TramitadorPagoRow
+      >;
+      tramitadores_saldo: FunctionDef<
+        { p_sede_id: string | null },
+        {
+          id: string;
+          nombre: string;
+          pagado_clientes: number;
+          reclamo: number;
+          pagado_tramitador: number;
+          saldo_a_favor: number;
+        }[]
+      >;
+      tramitador_extracto: FunctionDef<
+        { p_tramitador_id: string },
+        {
+          fecha: string;
+          tipo: "venta" | "pago_tramitador";
+          referencia_id: string;
+          descripcion: string;
+          monto: number;
+          pagado: number | null;
+          total: number | null;
+          saldo_acumulado: number;
+        }[]
+      >;
       corregir_forma_pago_venta: FunctionDef<
         { p_venta_pago_id: string; p_metodo_pago: MetodoPago },
         VentaPagoRow
+      >;
+      corregir_precio_tramitador_venta: FunctionDef<
+        { p_venta_id: string; p_precio_tramitador: number },
+        VentaRow
       >;
       aplicar_descuento_venta: FunctionDef<
         {

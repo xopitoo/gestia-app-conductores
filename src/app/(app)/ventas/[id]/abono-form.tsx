@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { registrarAbono } from "./actions";
 import { PagoLines } from "../pago-lines";
+import { buttonClass } from "@/lib/ui";
 
 export function AbonoForm({ ventaId, saldo }: { ventaId: string; saldo: number }) {
   const [state, formAction, pending] = useActionState(registrarAbono, {});
@@ -21,7 +22,7 @@ export function AbonoForm({ ventaId, saldo }: { ventaId: string; saldo: number }
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={buttonClass("primary")}
       >
         {pending ? "Registrando..." : "Registrar abono"}
       </button>

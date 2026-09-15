@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, HandCoins, Plus, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, HandCoins, Plus, X } from "lucide-react";
 import { registrarVenta } from "./actions";
 import { PagoLines } from "./pago-lines";
 import { DescuentoPicker } from "@/components/descuento-picker";
@@ -16,9 +16,62 @@ import type {
   VentaItemInput,
 } from "@/lib/supabase/types";
 import { formatCOP } from "@/lib/format";
+import { buttonClass, linkClass } from "@/lib/ui";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
+
+// Agrupa el catálogo por tipo de producto para que la lista de "Precios
+// normal" no quede como un mosaico desordenado — combos y promociones
+// primero (lo que más se vende junto), después exámenes, después
+// impresiones, y al final los trámites sueltos (duplicado, modificación,
+// RUNT). Cada grupo tiene su propio color para que se distingan de un
+// vistazo, no solo por el orden.
+type GrupoProducto = "combos" | "examenes" | "impresiones" | "otros";
+
+const GRUPO_ORDEN: GrupoProducto[] = ["combos", "examenes", "impresiones", "otros"];
+
+const GRUPO_LABEL: Record<GrupoProducto, string> = {
+  combos: "Combos y promociones",
+  examenes: "Exámenes médicos",
+  impresiones: "Impresiones",
+  otros: "Otros trámites",
+};
+
+const GRUPO_STYLE: Record<GrupoProducto, { badge: string; borderLeft: string; hover: string; icon: string }> = {
+  combos: {
+    badge: "bg-indigo-100 text-indigo-700",
+    borderLeft: "border-l-indigo-400",
+    hover: "hover:border-indigo-300 hover:bg-indigo-50",
+    icon: "text-indigo-600",
+  },
+  examenes: {
+    badge: "bg-emerald-100 text-emerald-700",
+    borderLeft: "border-l-emerald-400",
+    hover: "hover:border-emerald-300 hover:bg-emerald-50",
+    icon: "text-emerald-600",
+  },
+  impresiones: {
+    badge: "bg-amber-100 text-amber-700",
+    borderLeft: "border-l-amber-400",
+    hover: "hover:border-amber-300 hover:bg-amber-50",
+    icon: "text-amber-600",
+  },
+  otros: {
+    badge: "bg-slate-200 text-slate-600",
+    borderLeft: "border-l-slate-300",
+    hover: "hover:border-slate-300 hover:bg-slate-50",
+    icon: "text-slate-500",
+  },
+};
+
+function grupoDeProducto(nombre: string): GrupoProducto {
+  const n = nombre.toUpperCase();
+  if (n.includes("COMBO") || n.includes("PROMO")) return "combos";
+  if (n.includes("EXAMEN")) return "examenes";
+  if (n.includes("IMPRESION") || n.includes("IMPRESIÓN")) return "impresiones";
+  return "otros";
+}
 
 export function VentaForm({
   sedeId,
@@ -90,6 +143,13 @@ export function VentaForm({
         (p.categoria ?? "").toLowerCase().includes(term),
     );
   }, [q, productos]);
+
+  const productosAgrupados = useMemo(() => {
+    return GRUPO_ORDEN.map((grupo) => ({
+      grupo,
+      productos: productosFiltrados.filter((p) => grupoDeProducto(p.nombre) === grupo),
+    })).filter((g) => g.productos.length > 0);
+  }, [productosFiltrados]);
 
   const preciosTramitadorSeleccionado = useMemo(() => {
     if (!tramitadorId) return [];
@@ -183,23 +243,35 @@ export function VentaForm({
             <span className="text-sm font-medium text-slate-700">Precios normal</span>
             <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
           </summary>
-          <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto border-t border-slate-200 p-2 sm:grid-cols-2">
-            {productosFiltrados.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => agregarProducto(p)}
-                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-indigo-300 hover:bg-indigo-50"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-slate-800">{p.nombre}</p>
-                  <p className="text-xs text-slate-500">{formatCOP(p.precio)}</p>
+          <div className="flex max-h-72 flex-col gap-3 overflow-y-auto border-t border-slate-200 p-2">
+            {productosAgrupados.map(({ grupo, productos: productosGrupo }) => {
+              const style = GRUPO_STYLE[grupo];
+              return (
+                <div key={grupo} className="flex flex-col gap-1.5">
+                  <span className={`w-fit rounded-full px-2 py-0.5 text-[11px] font-semibold ${style.badge}`}>
+                    {GRUPO_LABEL[grupo]}
+                  </span>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {productosGrupo.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => agregarProducto(p)}
+                        className={`flex items-center justify-between gap-2 rounded-lg border border-slate-200 border-l-4 ${style.borderLeft} px-3 py-2 text-left text-sm transition ${style.hover}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-slate-800">{p.nombre}</p>
+                          <p className="text-xs text-slate-500">{formatCOP(p.precio)}</p>
+                        </div>
+                        <Plus className={`h-4 w-4 shrink-0 ${style.icon}`} />
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <Plus className="h-4 w-4 shrink-0 text-indigo-600" />
-              </button>
-            ))}
+              );
+            })}
             {productosFiltrados.length === 0 ? (
-              <p className="col-span-full py-4 text-center text-sm text-slate-400">
+              <p className="py-4 text-center text-sm text-slate-400">
                 Sin productos que coincidan.
               </p>
             ) : null}
@@ -342,6 +414,13 @@ export function VentaForm({
               <input type="hidden" name="precio_tramitador" value={0} />
             )}
           </div>
+          {tramitadorId && precioTramitador === 0 && montoReferido(tramitadorId, items) > 0 ? (
+            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              El precio especial quedó en $0 pero hay productos de este tramitador en el carrito — revisá que
+              sea a propósito antes de registrar.
+            </p>
+          ) : null}
           {tramitadorId ? (
             (() => {
               const totalReferido = montoReferido(tramitadorId, items);
@@ -378,7 +457,7 @@ export function VentaForm({
                             setDescuentoTipo("");
                             setDescuentoValor(0);
                           }}
-                          className="shrink-0 text-xs font-medium text-emerald-700 underline hover:text-emerald-900"
+                          className={`shrink-0 ${linkClass("success")}`}
                         >
                           Quitar
                         </button>
@@ -423,7 +502,7 @@ export function VentaForm({
       <button
         type="submit"
         disabled={pending || items.length === 0}
-        className="mt-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={`mt-1 ${buttonClass("primary")} w-full`}
       >
         {pending ? "Registrando..." : `Registrar orden — ${formatCOP(totalNeto)}`}
       </button>

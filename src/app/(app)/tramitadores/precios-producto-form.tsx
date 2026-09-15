@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { formatCOP } from "@/lib/format";
 import { guardarPrecioProducto, eliminarPrecioProducto } from "./actions";
+import { linkClass } from "@/lib/ui";
 
 export type PrecioProducto = {
   id: string;
@@ -100,7 +101,7 @@ export function PreciosProductoForm({
           <button
             type="button"
             onClick={() => setAbierto(false)}
-            className="text-xs font-medium text-slate-400 hover:text-slate-600"
+            className={linkClass("neutral")}
           >
             Cancelar
           </button>
@@ -109,7 +110,7 @@ export function PreciosProductoForm({
         <button
           type="button"
           onClick={() => setAbierto(true)}
-          className="self-start text-xs font-medium text-indigo-700 hover:underline"
+          className={`self-start ${linkClass("primary")}`}
         >
           + Precio por producto
         </button>

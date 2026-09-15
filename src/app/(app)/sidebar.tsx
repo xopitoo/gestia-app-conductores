@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
   Banknote,
@@ -18,8 +19,9 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
+import { iconButtonClass } from "@/lib/ui";
 
-const ROLE_LABEL = {
+export const ROLE_LABEL = {
   admin: "Administrador",
   recepcionista: "Recepcionista",
 } as const;
@@ -28,17 +30,11 @@ const STORAGE_KEY = "conductores-pos:sidebar-collapsed";
 
 export function Sidebar({
   role,
-  fullName,
-  initials,
   orgName,
-  sedeLabel,
   onLogout,
 }: {
   role: "admin" | "recepcionista";
-  fullName: string;
-  initials: string;
   orgName: string;
-  sedeLabel: string;
   onLogout: () => Promise<void>;
 }) {
   // Lazy initializer (no useEffect): evita el "flash" de expandido→contraído
@@ -67,7 +63,7 @@ export function Sidebar({
 
   return (
     <aside
-      className={`flex shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-200 print:hidden ${
+      className={`flex shrink-0 flex-col rounded-2xl bg-white/70 shadow-sm shadow-slate-200/70 transition-[width] duration-200 print:hidden ${
         collapsed ? "w-16" : "w-60"
       }`}
     >
@@ -97,6 +93,9 @@ export function Sidebar({
         <NavLink href="/clientes" icon={<Users className="h-4.5 w-4.5" />} collapsed={collapsed}>
           Clientes
         </NavLink>
+        <NavLink href="/tramitadores" icon={<Handshake className="h-4.5 w-4.5" />} collapsed={collapsed}>
+          Tramitadores
+        </NavLink>
 
         {role === "admin" ? (
           <>
@@ -118,9 +117,6 @@ export function Sidebar({
             </NavLink>
             <NavLink href="/admin/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
               Clientes en mora
-            </NavLink>
-            <NavLink href="/admin/tramitadores" icon={<Handshake className="h-4.5 w-4.5" />} collapsed={collapsed}>
-              Tramitadores
             </NavLink>
             <NavLink href="/admin/certificados" icon={<GraduationCap className="h-4.5 w-4.5" />} collapsed={collapsed}>
               Certificados RUNT
@@ -145,23 +141,15 @@ export function Sidebar({
         {!collapsed ? (
           <p className="truncate px-1 pb-2 text-xs text-slate-400">{orgName}</p>
         ) : null}
-        <div className="flex items-center gap-2 px-1">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-            {initials || "?"}
-          </span>
+        <div className={`flex items-center gap-2 px-1 ${collapsed ? "justify-center" : "justify-between"}`}>
           {!collapsed ? (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-slate-800">{fullName}</p>
-              <p className="truncate text-xs text-slate-400">
-                {ROLE_LABEL[role]} · {sedeLabel}
-              </p>
-            </div>
+            <p className="truncate text-xs text-slate-400">{ROLE_LABEL[role]}</p>
           ) : null}
           <form action={onLogout}>
             <button
               type="submit"
               title="Salir"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              className={iconButtonClass("sm")}
             >
               <LogOut className="h-4 w-4" />
             </button>
@@ -189,13 +177,18 @@ function NavLink({
   collapsed: boolean;
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const active = pathname === href || pathname?.startsWith(`${href}/`);
+
   return (
     <Link
       href={href}
       title={collapsed ? String(children) : undefined}
-      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 ${
-        collapsed ? "justify-center" : ""
-      }`}
+      className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
+        active
+          ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
+          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+      } ${collapsed ? "justify-center" : ""}`}
     >
       {icon}
       {!collapsed ? children : null}

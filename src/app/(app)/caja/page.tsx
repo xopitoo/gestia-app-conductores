@@ -7,6 +7,7 @@ import { formatCOP, formatDateTime } from "@/lib/format";
 import { bogotaTodayRange } from "@/lib/bogota-date";
 import { AbrirCajaForm, CerrarCajaForm, RegistrarEgresoForm } from "./caja-forms";
 import { METODO_PAGO_LABEL, type CajaMovimientoRow } from "@/lib/supabase/types";
+import { badgeClass, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Caja | Gestia App Conductores" };
 
@@ -153,13 +154,7 @@ export default async function CajaPage({
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-800">Estado de caja</h2>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                sesionAbierta
-                  ? "bg-emerald-100 text-emerald-700"
-                  : "bg-slate-100 text-slate-500"
-              }`}
-            >
+            <span className={badgeClass(sesionAbierta ? "success" : "neutral")}>
               {sesionAbierta ? "Abierta" : "Cerrada"}
             </span>
           </div>
@@ -228,13 +223,7 @@ export default async function CajaPage({
                         {s.closed_at ? formatDateTime(s.closed_at) : "—"}
                       </td>
                       <td className="py-2 pr-3">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                            s.estado === "abierta"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
+                        <span className={badgeClass(s.estado === "abierta" ? "success" : "neutral")}>
                           {s.estado === "abierta" ? "Abierta" : "Cerrada"}
                         </span>
                       </td>
@@ -244,7 +233,7 @@ export default async function CajaPage({
                         {s.estado === "cerrada" ? (
                           <Link
                             href={`/caja/${s.id}/cierre`}
-                            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline"
+                            className={`inline-flex items-center gap-1 ${linkClass("primary")}`}
                           >
                             <Printer className="h-3.5 w-3.5" />
                             Imprimir

@@ -8,6 +8,7 @@ import { DailyChart } from "./daily-chart";
 import { MonthlyYearChart } from "./monthly-year-chart";
 import { PaymentBreakdown } from "./payment-breakdown";
 import { RecepcionistaDashboard } from "./recepcionista-dashboard";
+import { getTramitadoresConSaldo } from "@/lib/tramitador-saldo";
 
 export const metadata: Metadata = { title: "Dashboard | Gestia App Conductores" };
 
@@ -35,7 +36,7 @@ export default async function DashboardPage({
 
     let ventasHoyQuery = supabase
       .from("ventas")
-      .select("id, cliente_id, monto, descuento, created_at")
+      .select("id, cliente_id, tramitador_id, monto, descuento, created_at")
       .gte("created_at", hoy.toISOString())
       .lt("created_at", manana.toISOString())
       .neq("estado", "anulada")
@@ -45,6 +46,7 @@ export default async function DashboardPage({
 
     const ventaIds = (ventasHoy ?? []).map((v) => v.id);
     const clienteIds = [...new Set((ventasHoy ?? []).map((v) => v.cliente_id))];
+    const tramitadorIds = [...new Set((ventasHoy ?? []).map((v) => v.tramitador_id).filter((id): id is string => !!id))];
 
     let egresosQuery = supabase
       .from("caja_movimientos")
@@ -55,7 +57,7 @@ export default async function DashboardPage({
       .order("created_at", { ascending: false });
     if (sedeId) egresosQuery = egresosQuery.eq("sede_id", sedeId);
 
-    const [{ data: pagosRows }, { data: clientesRows }, { data: egresosRows }, { data: sesionAbierta }] =
+    const [{ data: pagosRows }, { data: clientesRows }, { data: tramitadoresRows }, { data: egresosRows }, { data: sesionAbierta }, tramitadores] =
       await Promise.all([
         ventaIds.length
           ? supabase.from("venta_pagos").select("venta_id, monto, metodo_pago").in("venta_id", ventaIds)
@@ -63,10 +65,16 @@ export default async function DashboardPage({
         clienteIds.length
           ? supabase.from("clientes").select("id, nombre_completo").in("id", clienteIds)
           : Promise.resolve({ data: [] as { id: string; nombre_completo: string }[] }),
+        tramitadorIds.length
+          ? supabase.from("tramitadores").select("id, nombre").in("id", tramitadorIds)
+          : Promise.resolve({ data: [] as { id: string; nombre: string }[] }),
         egresosQuery,
         sedeId
           ? supabase.from("caja_sesiones").select("id").eq("sede_id", sedeId).eq("estado", "abierta").maybeSingle()
           : Promise.resolve({ data: null }),
+        // Lista discreta de tramitadores con saldo — solo aparece si la
+        // sede tiene tramitadores (hoy, solo C.R.C. VALORAR).
+        sedeId ? getTramitadoresConSaldo(supabase, sedeId) : Promise.resolve([]),
       ]);
 
     const ventasFilas = (ventasHoy ?? []).map((v) => {
@@ -79,6 +87,13 @@ export default async function DashboardPage({
         id: v.id,
         createdAt: v.created_at,
         clienteNombre: clientesRows?.find((c) => c.id === v.cliente_id)?.nombre_completo ?? "—",
+        // Si esta venta tiene tramitador, lo que "debe" no es plata que se
+        // le vaya a cobrar al cliente — es al tramitador a quien se le
+        // cobra, así la venta traiga además algún producto sin relación
+        // con él (ver tramitadores_saldo en schema.sql).
+        tramitadorNombre: v.tramitador_id
+          ? ((tramitadoresRows ?? []).find((t) => t.id === v.tramitador_id)?.nombre ?? null)
+          : null,
         metodos,
         abonado,
         debe: v.monto - v.descuento - abonado,
@@ -94,7 +109,12 @@ export default async function DashboardPage({
     }));
 
     return (
-      <RecepcionistaDashboard ventas={ventasFilas} egresos={egresosFilas} cajaAbierta={!!sesionAbierta} />
+      <RecepcionistaDashboard
+        ventas={ventasFilas}
+        egresos={egresosFilas}
+        cajaAbierta={!!sesionAbierta}
+        tramitadores={tramitadores.filter((t) => t.saldoAFavor !== 0)}
+      />
     );
   }
 

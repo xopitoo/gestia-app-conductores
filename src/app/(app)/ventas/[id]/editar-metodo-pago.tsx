@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { corregirMetodoPago } from "./actions";
 import { METODO_PAGO_LABEL, METODO_PAGO_SELECCIONABLE, type MetodoPago } from "@/lib/supabase/types";
+import { linkClass } from "@/lib/ui";
 
 /**
  * Corrección puntual del método de pago de un pago ya registrado — para
@@ -40,7 +41,7 @@ export function EditarMetodoPago({
       <button
         type="button"
         onClick={() => setEditando(true)}
-        className="flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-indigo-700"
+        className={`flex items-center gap-1 ${linkClass("primary")}`}
         title="Corregir forma de pago"
       >
         <Pencil className="h-3 w-3" aria-hidden="true" />
@@ -73,7 +74,7 @@ export function EditarMetodoPago({
       <button
         type="button"
         onClick={() => setEditando(false)}
-        className="text-xs font-medium text-slate-400 hover:text-slate-600"
+        className={linkClass("neutral")}
       >
         Cancelar
       </button>

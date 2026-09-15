@@ -6,6 +6,7 @@ import { getViewerContext, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { formatDateTime } from "@/lib/format";
 import { bogotaMonthRange } from "@/lib/bogota-date";
+import { iconButtonClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Certificados RUNT | Gestia App Conductores" };
 
@@ -86,7 +87,7 @@ export default async function CertificadosPage({
       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-5">
         <Link
           href={conSede(mesAdyacente(yearMonth, -1))}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+          className={iconButtonClass("md")}
         >
           <ChevronLeft className="h-5 w-5" />
         </Link>
@@ -101,7 +102,7 @@ export default async function CertificadosPage({
         </div>
         <Link
           href={conSede(mesAdyacente(yearMonth, 1))}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+          className={iconButtonClass("md")}
         >
           <ChevronRight className="h-5 w-5" />
         </Link>

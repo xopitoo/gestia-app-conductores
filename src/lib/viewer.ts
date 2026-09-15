@@ -6,6 +6,8 @@ import type { OrganizationRow, ProfileRow, SedeRow } from "@/lib/supabase/types"
 export type ViewerContext = {
   supabase: Awaited<ReturnType<typeof createClient>>;
   userId: string;
+  /** Del usuario de auth, no de profiles (esa tabla no guarda email). */
+  email: string | null;
   profile: ProfileRow;
   organization: OrganizationRow;
   /** Sedes activas de la organización. Para 'recepcionista' siempre trae solo la propia. */
@@ -82,6 +84,7 @@ export const getViewerContext = cache(async (): Promise<ViewerContext> => {
   return {
     supabase,
     userId: user.id,
+    email: user.email ?? null,
     profile: profile as ProfileRow,
     organization: organization as OrganizationRow,
     sedes: sedes ?? [],

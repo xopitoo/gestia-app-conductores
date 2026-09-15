@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { getViewerContext } from "@/lib/viewer";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { formatCOP } from "@/lib/format";
 import { crearProducto, toggleProductoActive } from "./actions";
+import { badgeClass, buttonClass, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Productos | Gestia App Conductores" };
 
@@ -53,14 +55,7 @@ export default async function ProductosPage() {
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
                     {g.items.length} {g.items.length === 1 ? "producto" : "productos"}
                   </span>
-                  <svg
-                    className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
                 </span>
               </summary>
               <div className="overflow-x-auto border-t border-slate-200">
@@ -83,11 +78,7 @@ export default async function ProductosPage() {
                         <td className="px-4 py-2.5 text-slate-600 capitalize">{p.categoria ?? "—"}</td>
                         <td className="px-4 py-2.5 text-slate-600">{formatCOP(p.precio)}</td>
                         <td className="px-4 py-2.5">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                              p.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
+                          <span className={badgeClass(p.active ? "success" : "neutral")}>
                             {p.active ? "Activo" : "Inactivo"}
                           </span>
                         </td>
@@ -97,7 +88,7 @@ export default async function ProductosPage() {
                             <input type="hidden" name="active" value={String(p.active)} />
                             <ConfirmSubmitButton
                               confirmMessage={p.active ? `¿Desactivar ${p.nombre}?` : `¿Reactivar ${p.nombre}?`}
-                              className="text-xs font-medium text-indigo-700 hover:underline"
+                              className={linkClass(p.active ? "destructive" : "success")}
                             >
                               {p.active ? "Desactivar" : "Activar"}
                             </ConfirmSubmitButton>
@@ -157,10 +148,7 @@ export default async function ProductosPage() {
             placeholder="Precio"
             className="rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
           />
-          <button
-            type="submit"
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
-          >
+          <button type="submit" className={buttonClass("primary")}>
             Agregar producto
           </button>
         </form>

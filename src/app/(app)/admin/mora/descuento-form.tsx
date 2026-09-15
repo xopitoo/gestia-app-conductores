@@ -5,6 +5,7 @@ import { aplicarDescuento } from "./actions";
 import { DescuentoPicker } from "@/components/descuento-picker";
 import { formatCOP } from "@/lib/format";
 import type { DescuentoTipo } from "@/lib/supabase/types";
+import { buttonClass, linkClass } from "@/lib/ui";
 
 /**
  * Colapsado por defecto — con muchos clientes en mora, el picker completo
@@ -40,7 +41,7 @@ export function DescuentoForm({
       <button
         type="button"
         onClick={() => setAbierto(true)}
-        className="text-xs font-medium text-indigo-700 hover:underline"
+        className={linkClass("primary")}
       >
         {descuentoActual > 0 ? `Editar descuento (${formatCOP(descuentoActual)})` : "Aplicar descuento"}
       </button>
@@ -83,14 +84,14 @@ export function DescuentoForm({
         <button
           type="submit"
           disabled={pending || excede}
-          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className={buttonClass("primary", "sm")}
         >
           {pending ? "Guardando..." : "Aplicar descuento"}
         </button>
         <button
           type="button"
           onClick={() => setAbierto(false)}
-          className="text-xs font-medium text-slate-400 hover:text-slate-600"
+          className={linkClass("neutral")}
         >
           Cancelar
         </button>

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getViewerContext, resolveSedeId } from "@/lib/viewer";
 import { parseItems, parsePagos } from "./parse-form-arrays";
+import { adjuntarComprobantes } from "@/lib/comprobante-pago";
 import type { DescuentoTipo } from "@/lib/supabase/types";
 
 export type VentaFormState = {
@@ -37,11 +38,16 @@ export async function registrarVenta(
   // (ej. un tramitador trae gente y paga al día siguiente) — registrar_venta
   // igual exige el PIN de autorización porque $0 pagado es menos del 50%.
 
+  const adjunto = await adjuntarComprobantes(supabase, formData, pagos, profile.organization_id!);
+  if ("error" in adjunto) {
+    return { error: adjunto.error };
+  }
+
   const { error } = await supabase.rpc("registrar_venta", {
     p_sede_id: sedeId,
     p_cliente_id: clienteId,
     p_items: items,
-    p_pagos: pagos,
+    p_pagos: adjunto.pagos,
     p_vendedor_id: profile.id,
     p_pin: pin,
     p_descuento_tipo: descuentoTipo,

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getViewerContext } from "@/lib/viewer";
 import { parsePagos } from "../../../ventas/parse-form-arrays";
+import { adjuntarComprobantes } from "@/lib/comprobante-pago";
 
 export type ConvertirFormState = {
   error?: string;
@@ -13,7 +14,7 @@ export async function convertirCotizacion(
   _prevState: ConvertirFormState,
   formData: FormData,
 ): Promise<ConvertirFormState> {
-  const { supabase } = await getViewerContext();
+  const { supabase, profile } = await getViewerContext();
   const cotizacionId = String(formData.get("cotizacion_id") ?? "");
   const pagos = parsePagos(String(formData.get("pagos") ?? "[]"));
   const pin = String(formData.get("pin") ?? "") || null;
@@ -22,9 +23,14 @@ export async function convertirCotizacion(
     return { error: "Registrá al menos un pago." };
   }
 
+  const adjunto = await adjuntarComprobantes(supabase, formData, pagos, profile.organization_id!);
+  if ("error" in adjunto) {
+    return { error: adjunto.error };
+  }
+
   const { data, error } = await supabase.rpc("convertir_cotizacion", {
     p_cotizacion_id: cotizacionId,
-    p_pagos: pagos,
+    p_pagos: adjunto.pagos,
     p_pin: pin,
   });
 

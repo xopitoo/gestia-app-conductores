@@ -7,14 +7,9 @@ import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { formatCOP, formatDateTime } from "@/lib/format";
 import { anularVenta } from "./actions";
 import { METODO_PAGO_LABEL, type EstadoVenta } from "@/lib/supabase/types";
+import { badgeClass, buttonClass, ESTADO_VENTA_LABEL, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Ventas | Gestia App Conductores" };
-
-const ESTADO_LABEL: Record<string, { label: string; className: string }> = {
-  pagada: { label: "Pagada", className: "bg-emerald-100 text-emerald-700" },
-  abonada: { label: "Abonada", className: "bg-amber-100 text-amber-700" },
-  anulada: { label: "Anulada", className: "bg-slate-100 text-slate-500" },
-};
 
 function monthRange() {
   const now = new Date();
@@ -120,14 +115,14 @@ export default async function VentasPage({
           <SedeSelect sedes={sedes} currentSedeId={sedeFilter} allowAll={profile.role === "admin"} />
           <Link
             href="/clientes/nuevo"
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className={buttonClass("secondary")}
           >
             <UserPlus className="h-4 w-4" />
             Crear cliente
           </Link>
           <Link
             href="/ventas/nueva"
-            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
+            className={buttonClass("primary")}
           >
             <Plus className="h-4 w-4" />
             Registrar nueva orden
@@ -174,7 +169,7 @@ export default async function VentasPage({
         </select>
         <input type="date" name="desde" defaultValue={desde} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-600" />
         <input type="date" name="hasta" defaultValue={hasta} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-600" />
-        <button type="submit" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
+        <button type="submit" className={buttonClass("secondary")}>
           Filtrar
         </button>
       </form>
@@ -195,7 +190,7 @@ export default async function VentasPage({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filtered.map((v) => {
-              const estado = ESTADO_LABEL[v.estado] ?? ESTADO_LABEL.pagada;
+              const estado = ESTADO_VENTA_LABEL[v.estado] ?? ESTADO_VENTA_LABEL.pagada;
               const metodos = metodosDeVenta(v.id);
               const pagado = pagadoDeVenta(v.id);
               return (
@@ -215,7 +210,7 @@ export default async function VentasPage({
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1">
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${estado.className}`}>
+                      <span className={badgeClass(estado.tone)}>
                         {estado.label}
                       </span>
                       {v.certificado ? (
@@ -252,7 +247,7 @@ export default async function VentasPage({
                           <input type="hidden" name="id" value={v.id} />
                           <ConfirmSubmitButton
                             confirmMessage="¿Anular esta venta?"
-                            className="text-xs font-medium text-red-600 hover:underline"
+                            className={linkClass("destructive")}
                           >
                             Anular
                           </ConfirmSubmitButton>

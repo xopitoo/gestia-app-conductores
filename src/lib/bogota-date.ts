@@ -20,6 +20,20 @@ export function bogotaTodayRange(reference: Date = new Date()): { start: Date; e
   return { start, end };
 }
 
+/** Año/mes/día de "hoy" en hora de Bogotá — para comparar contra columnas
+ * `date` (ej. fecha_nacimiento) sin el problema de huso horario de
+ * `new Date().getMonth()/getDate()`. */
+export function bogotaTodayYMD(reference: Date = new Date()): { year: number; month: number; day: number } {
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(reference);
+  const [year, month, day] = ymd.split("-").map(Number);
+  return { year, month, day };
+}
+
 /** Suma/resta días operando en UTC — seguro para desplazar los instantes
  * que devuelve bogotaTodayRange (offset fijo, sin DST de por medio). */
 export function addDaysUTC(date: Date, days: number): Date {

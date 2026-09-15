@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { crearUsuarioRecepcionista } from "./actions";
 import type { SedeRow } from "@/lib/supabase/types";
+import { buttonClass } from "@/lib/ui";
 
 const inputClass =
   "rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
@@ -33,7 +34,7 @@ export function UsuarioForm({ sedes }: { sedes: SedeRow[] }) {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={buttonClass("primary")}
       >
         {pending ? "Creando..." : "Crear usuario"}
       </button>

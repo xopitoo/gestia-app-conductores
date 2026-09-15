@@ -37,3 +37,13 @@ export function parsePagos(raw: string): VentaPagoInput[] {
     return [];
   }
 }
+
+/**
+ * El comprobante de cada línea de pago viaja aparte del JSON de `pagos`
+ * (los <input type="file"> no se pueden meter en un string) — se manda en
+ * el mismo <form> como `comprobante_<índice>`, en el mismo orden que el
+ * array de pagos, y acá se juntan.
+ */
+export function pagoComprobanteFieldName(index: number): string {
+  return `comprobante_${index}`;
+}

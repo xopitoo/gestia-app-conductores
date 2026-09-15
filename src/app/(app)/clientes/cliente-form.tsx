@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle } from "lucide-react";
 import type { ClienteFormState } from "./actions";
 import type { ClienteRow, SedeRow } from "@/lib/supabase/types";
 import { RuntConsultaLink } from "@/components/runt-link";
+import { buttonClass } from "@/lib/ui";
 
 const TIPOS_DOCUMENTO = [
   { value: "CC", label: "Cédula de ciudadanía" },
@@ -227,7 +228,7 @@ export function ClienteForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className={buttonClass("primary")}
         >
           {pending ? "Guardando..." : submitLabel}
         </button>

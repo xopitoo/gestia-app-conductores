@@ -7,6 +7,7 @@ import { actualizarCliente } from "../actions";
 import { ClienteForm } from "../cliente-form";
 import { RuntBadge } from "../runt-badge";
 import { RuntConsultaLink } from "@/components/runt-link";
+import { buttonClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Cliente | Gestia App Conductores" };
 
@@ -64,7 +65,7 @@ export default async function ClienteDetailPage({
             <RuntConsultaLink documento={`${cliente.tipo_documento} ${cliente.numero_documento}`} />
             <Link
               href={`/ventas/nueva?sede=${cliente.sede_id}&cliente=${cliente.id}`}
-              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
+              className={buttonClass("primary")}
             >
               <ShoppingBag className="h-4 w-4" />
               Crear venta

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText, GraduationCap, Printer } from "lucide-react";
+import { ArrowLeft, FileText, GraduationCap, Paperclip, Printer } from "lucide-react";
 import { getViewerContext } from "@/lib/viewer";
 import { getTramitadorSaldo } from "@/lib/tramitador-saldo";
 import { formatCOP, formatDateTime } from "@/lib/format";
@@ -10,16 +10,12 @@ import { AbonoForm } from "./abono-form";
 import { CertificadoRuntForm } from "./certificado-runt-form";
 import { CruceTramitadorForm } from "./cruce-tramitador-form";
 import { EditarMetodoPago } from "./editar-metodo-pago";
+import { EditarPrecioTramitador } from "./editar-precio-tramitador";
 import { RuntBadge } from "@/app/(app)/clientes/runt-badge";
 import { RuntConsultaLink } from "@/components/runt-link";
+import { badgeClass, ESTADO_VENTA_LABEL, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Venta | Gestia App Conductores" };
-
-const ESTADO_LABEL: Record<string, { label: string; className: string }> = {
-  pagada: { label: "Pagada", className: "bg-emerald-100 text-emerald-700" },
-  abonada: { label: "Abonada", className: "bg-amber-100 text-amber-700" },
-  anulada: { label: "Anulada", className: "bg-slate-100 text-slate-500" },
-};
 
 export default async function VentaDetailPage({
   params,
@@ -58,7 +54,7 @@ export default async function VentaDetailPage({
         .order("created_at"),
       supabase
         .from("venta_pagos")
-        .select("id, monto, metodo_pago, created_at")
+        .select("id, monto, metodo_pago, comprobante_path, created_at")
         .eq("venta_id", id)
         .order("created_at"),
       supabase
@@ -84,10 +80,23 @@ export default async function VentaDetailPage({
         .eq("tramitador_id", venta.tramitador_id)
     : { data: [] as { producto_id: string; precio_especial: number }[] };
 
+  const comprobanteUrls = new Map(
+    await Promise.all(
+      (pagos ?? [])
+        .filter((p) => p.comprobante_path)
+        .map(async (p) => {
+          const { data } = await supabase.storage
+            .from("comprobantes-pago")
+            .createSignedUrl(p.comprobante_path!, 60 * 10);
+          return [p.id, data?.signedUrl ?? null] as const;
+        }),
+    ),
+  );
+
   const pagado = (pagos ?? []).reduce((acc, p) => acc + p.monto, 0);
   const totalNeto = venta.monto - venta.descuento;
   const saldo = totalNeto - pagado;
-  const estado = ESTADO_LABEL[venta.estado] ?? ESTADO_LABEL.pagada;
+  const estado = ESTADO_VENTA_LABEL[venta.estado] ?? ESTADO_VENTA_LABEL.pagada;
 
   // Igual que en venta-form.tsx: solo los productos con precio puntual para
   // este tramitador cuentan como "lo que él trajo" — si no hay ninguno con
@@ -135,11 +144,19 @@ export default async function VentaDetailPage({
               {cliente?.tipo_documento} {cliente?.numero_documento} · {formatDateTime(venta.created_at)}
             </p>
             {tramitador ? (
-              <p className="mt-1 text-xs text-indigo-600">
-                Tramitador: {tramitador.nombre} — precio especial {formatCOP(venta.precio_tramitador)}, ganancia
-                del tramitador {formatCOP(gananciaTramitador)} sobre {formatCOP(montoReferidoNeto)} (lo que él
-                trajo){hayItemsAjenos ? "; el resto de la orden no le corresponde a él" : ""}
-              </p>
+              <div className="mt-1 text-xs text-indigo-600">
+                <p>
+                  Tramitador: {tramitador.nombre} — precio especial {formatCOP(venta.precio_tramitador)}, ganancia
+                  del tramitador {formatCOP(gananciaTramitador)} sobre {formatCOP(montoReferidoNeto)} (lo que él
+                  trajo){hayItemsAjenos ? "; el resto de la orden no le corresponde a él" : ""}
+                  {profile.role === "admin" ? (
+                    <>
+                      {" "}
+                      <EditarPrecioTramitador ventaId={venta.id} precioActual={venta.precio_tramitador} />
+                    </>
+                  ) : null}
+                </p>
+              </div>
             ) : venta.referido_nombre ? (
               <p className="mt-1 text-xs text-indigo-600">Referido: {venta.referido_nombre}</p>
             ) : null}
@@ -148,7 +165,7 @@ export default async function VentaDetailPage({
             {cliente ? (
               <RuntConsultaLink documento={`${cliente.tipo_documento} ${cliente.numero_documento}`} />
             ) : null}
-            <span className={`rounded-full px-3 py-1 text-xs font-medium ${estado.className}`}>
+            <span className={badgeClass(estado.tone, "md")}>
               {estado.label}
             </span>
           </div>
@@ -208,9 +225,20 @@ export default async function VentaDetailPage({
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-medium text-slate-800">{formatCOP(p.monto)}</span>
+                    {comprobanteUrls.get(p.id) ? (
+                      <a
+                        href={comprobanteUrls.get(p.id)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`flex items-center gap-1 ${linkClass("primary")}`}
+                      >
+                        <Paperclip className="h-3.5 w-3.5" />
+                        Comprobante
+                      </a>
+                    ) : null}
                     <Link
                       href={`/ventas/${venta.id}/recibo/${p.id}`}
-                      className="flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline"
+                      className={`flex items-center gap-1 ${linkClass("primary")}`}
                     >
                       <Printer className="h-3.5 w-3.5" />
                       Recibo
@@ -237,7 +265,15 @@ export default async function VentaDetailPage({
                   saldoTramitador={tramitadorSaldo}
                 />
               ) : null}
-              {sesionAbierta ? (
+              {tramitador ? (
+                <p className="rounded-lg bg-indigo-50 p-3 text-sm text-indigo-800">
+                  Esta venta la trajo {tramitador.nombre} — lo que falta por pagar se cobra desde{" "}
+                  <Link href="/tramitadores" className="font-medium underline">
+                    el módulo Tramitadores
+                  </Link>
+                  , no acá.
+                </p>
+              ) : sesionAbierta ? (
                 <AbonoForm ventaId={venta.id} saldo={saldo} />
               ) : (
                 <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
@@ -266,7 +302,7 @@ export default async function VentaDetailPage({
                   href={certificadoUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline"
+                  className={`flex items-center gap-1 ${linkClass("primary")}`}
                 >
                   <FileText className="h-3.5 w-3.5" aria-hidden="true" />
                   Ver certificado

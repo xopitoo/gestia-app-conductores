@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { actualizarPin } from "./actions";
+import { buttonClass } from "@/lib/ui";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
@@ -49,7 +50,7 @@ export function PinForm() {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={buttonClass("primary")}
       >
         {pending ? "Guardando..." : "Guardar PIN"}
       </button>

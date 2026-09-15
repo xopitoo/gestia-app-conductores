@@ -6,14 +6,9 @@ import { getViewerContext } from "@/lib/viewer";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { formatCOP, formatDate, formatDateTime } from "@/lib/format";
 import { rechazarCotizacion } from "../actions";
+import { badgeClass, buttonClass, ESTADO_COTIZACION_LABEL } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Cotización | Gestia App Conductores" };
-
-const ESTADO_LABEL: Record<string, { label: string; className: string }> = {
-  pendiente: { label: "Pendiente", className: "bg-indigo-100 text-indigo-700" },
-  convertida: { label: "Convertida", className: "bg-emerald-100 text-emerald-700" },
-  rechazada: { label: "Rechazada", className: "bg-slate-100 text-slate-500" },
-};
 
 export default async function CotizacionDetailPage({
   params,
@@ -46,7 +41,7 @@ export default async function CotizacionDetailPage({
       .maybeSingle(),
   ]);
 
-  const estado = ESTADO_LABEL[cotizacion.estado] ?? ESTADO_LABEL.pendiente;
+  const estado = ESTADO_COTIZACION_LABEL[cotizacion.estado] ?? ESTADO_COTIZACION_LABEL.pendiente;
   const vencida =
     cotizacion.estado === "pendiente" &&
     cotizacion.valida_hasta &&
@@ -80,11 +75,11 @@ export default async function CotizacionDetailPage({
             ) : null}
           </div>
           <div className="flex flex-col items-end gap-1.5">
-            <span className={`rounded-full px-3 py-1 text-xs font-medium ${estado.className}`}>
+            <span className={badgeClass(estado.tone, "md")}>
               {estado.label}
             </span>
             {vencida ? (
-              <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">
+              <span className={badgeClass("danger", "md")}>
                 Vencida
               </span>
             ) : null}
@@ -111,7 +106,7 @@ export default async function CotizacionDetailPage({
           <div className="mt-5 flex items-center gap-3 border-t border-slate-200 pt-5">
             <Link
               href={`/cotizaciones/${cotizacion.id}/convertir`}
-              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
+              className={buttonClass("primary")}
             >
               <ArrowRightLeft className="h-4 w-4" />
               Convertir a venta
@@ -120,7 +115,7 @@ export default async function CotizacionDetailPage({
               <input type="hidden" name="id" value={cotizacion.id} />
               <ConfirmSubmitButton
                 confirmMessage="¿Rechazar esta cotización?"
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+                className={buttonClass("destructive")}
               >
                 Rechazar
               </ConfirmSubmitButton>

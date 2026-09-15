@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { Lock, LockOpen, ShoppingBag, UserPlus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Lock, LockOpen, ShoppingBag, UserPlus } from "lucide-react";
 import { formatCOP, formatDate, formatTime } from "@/lib/format";
 
 export type FilaVentaHoy = {
   id: string;
   createdAt: string;
   clienteNombre: string;
+  /** Si la venta tiene tramitador, lo que "debe" es deuda de él, no del cliente. */
+  tramitadorNombre: string | null;
   metodos: string;
   abonado: number;
   debe: number;
@@ -19,6 +21,21 @@ export type FilaEgresoHoy = {
   metodo: string | null;
 };
 
+export type TramitadorSaldoFila = {
+  id: string;
+  nombre: string;
+  saldoAFavor: number;
+};
+
+function iniciales(nombre: string) {
+  return nombre
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join("");
+}
+
 /**
  * Dashboard del recepcionista: sin gráficas ni rankings (eso es solo para
  * admin) — una lista de las ventas de hoy en su sede, con lo abonado y lo
@@ -28,12 +45,17 @@ export function RecepcionistaDashboard({
   ventas,
   egresos,
   cajaAbierta,
+  tramitadores,
 }: {
   ventas: FilaVentaHoy[];
   egresos: FilaEgresoHoy[];
   cajaAbierta: boolean;
+  /** Solo informativo — nunca vacía en sedes sin tramitadores (ej. las escuelas). */
+  tramitadores: TramitadorSaldoFila[];
 }) {
   const hoy = new Date().toISOString();
+  const nosDeben = tramitadores.filter((t) => t.saldoAFavor < 0);
+  const lesDebemos = tramitadores.filter((t) => t.saldoAFavor > 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -76,41 +98,67 @@ export function RecepcionistaDashboard({
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm shadow-slate-200/70">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
+          <thead className="text-left text-xs font-medium text-slate-500">
             <tr>
-              <th className="px-4 py-3">Factura</th>
-              <th className="px-4 py-3">Fecha</th>
-              <th className="px-4 py-3">Hora</th>
-              <th className="px-4 py-3 text-right">Abonado</th>
-              <th className="px-4 py-3 text-right">Debe</th>
-              <th className="px-4 py-3">Cliente</th>
-              <th className="px-4 py-3">Método</th>
+              <th className="px-4 py-3.5">Factura</th>
+              <th className="px-4 py-3.5">Fecha</th>
+              <th className="px-4 py-3.5">Hora</th>
+              <th className="px-4 py-3.5 text-right">Abonado</th>
+              <th className="px-4 py-3.5 text-right">Debe</th>
+              <th className="px-4 py-3.5">Cliente</th>
+              <th className="px-4 py-3.5">Método</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {ventas.map((v) => (
-              <tr key={v.id}>
-                <td className="px-4 py-3 font-mono text-xs">
+              <tr key={v.id} className="transition hover:bg-indigo-50/40">
+                <td className="px-4 py-3.5 font-mono text-xs">
                   <Link href={`/ventas/${v.id}`} className="text-indigo-700 hover:underline">
                     #{v.id.slice(0, 8).toUpperCase()}
                   </Link>
                 </td>
-                <td className="px-4 py-3 text-slate-500">{formatDate(v.createdAt)}</td>
-                <td className="px-4 py-3 text-slate-500">{formatTime(v.createdAt)}</td>
-                <td className="px-4 py-3 text-right font-medium text-emerald-600">
+                <td className="px-4 py-3.5 text-slate-500">{formatDate(v.createdAt)}</td>
+                <td className="px-4 py-3.5 text-slate-500">{formatTime(v.createdAt)}</td>
+                <td className="px-4 py-3.5 text-right font-medium text-emerald-600">
                   {formatCOP(v.abonado)}
                 </td>
                 <td
-                  className={`px-4 py-3 text-right font-medium ${
+                  className={`px-4 py-3.5 text-right font-medium ${
                     v.debe > 0 ? "text-amber-700" : "text-slate-400"
                   }`}
                 >
-                  {v.debe > 0 ? formatCOP(v.debe) : "—"}
+                  {v.debe > 0 ? (
+                    <>
+                      {formatCOP(v.debe)}
+                      {v.tramitadorNombre ? (
+                        <span className="block text-[11px] font-normal text-slate-400">
+                          vía {v.tramitadorNombre}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
-                <td className="px-4 py-3 font-medium text-slate-800">{v.clienteNombre}</td>
-                <td className="px-4 py-3 text-slate-600">{v.metodos || "—"}</td>
+                <td className="px-4 py-3.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
+                      {iniciales(v.clienteNombre) || "?"}
+                    </span>
+                    <span className="font-medium text-slate-800">{v.clienteNombre}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3.5">
+                  {v.metodos ? (
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                      {v.metodos}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
               </tr>
             ))}
             {ventas.length === 0 ? (
@@ -125,7 +173,7 @@ export function RecepcionistaDashboard({
       </div>
 
       {egresos.length > 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="rounded-2xl bg-white p-5 shadow-sm shadow-slate-200/70">
           <h2 className="mb-3 text-sm font-semibold text-slate-800">Egresos de hoy</h2>
           <ul className="flex flex-col divide-y divide-slate-100">
             {egresos.map((e) => (
@@ -141,6 +189,54 @@ export function RecepcionistaDashboard({
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+
+      {tramitadores.length > 0 ? (
+        <div className="rounded-2xl bg-gradient-to-br from-white via-white to-indigo-50/40 p-5 shadow-sm shadow-slate-200/70">
+          <h2 className="mb-4 text-sm font-semibold text-slate-800">Valores pendientes</h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {nosDeben.length > 0 ? (
+              <div className="rounded-xl bg-red-50/70 p-3.5">
+                <div className="mb-2.5 flex items-center gap-1.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-red-100">
+                    <ArrowDownRight className="h-3.5 w-3.5 text-red-600" aria-hidden="true" />
+                  </span>
+                  <p className="text-xs font-semibold text-red-700">Nos deben</p>
+                </div>
+                <ul className="flex flex-col gap-1.5">
+                  {nosDeben.map((t) => (
+                    <li key={t.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm text-slate-700">{t.nombre}</span>
+                      <span className="shrink-0 rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700">
+                        {formatCOP(-t.saldoAFavor)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {lesDebemos.length > 0 ? (
+              <div className="rounded-xl bg-emerald-50/70 p-3.5">
+                <div className="mb-2.5 flex items-center gap-1.5">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100">
+                    <ArrowUpRight className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                  </span>
+                  <p className="text-xs font-semibold text-emerald-700">Les debemos</p>
+                </div>
+                <ul className="flex flex-col gap-1.5">
+                  {lesDebemos.map((t) => (
+                    <li key={t.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm text-slate-700">{t.nombre}</span>
+                      <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                        {formatCOP(t.saldoAFavor)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>

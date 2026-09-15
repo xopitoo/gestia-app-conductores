@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { logout } from "@/app/login/actions";
 import { createClient } from "@/lib/supabase/server";
 import { SedeForm } from "./sede-form";
+import { linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Elegí tu sede | Gestia App Conductores" };
 
@@ -61,7 +62,7 @@ export default async function ElegirSedePage() {
         </div>
 
         <form action={logout} className="mt-4 text-center">
-          <button type="submit" className="text-xs font-medium text-slate-400 hover:text-slate-600">
+          <button type="submit" className={linkClass("neutral")}>
             Salir
           </button>
         </form>

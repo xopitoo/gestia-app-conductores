@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getViewerContext } from "@/lib/viewer";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { crearSede, toggleSedeActive } from "./actions";
+import { badgeClass, buttonClass, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Sedes | Gestia App Conductores" };
 
@@ -41,11 +42,7 @@ export default async function SedesPage() {
                   <td className="px-4 py-2.5 font-medium text-slate-800">{s.name}</td>
                   <td className="px-4 py-2.5 text-slate-600">{s.address ?? "—"}</td>
                   <td className="px-4 py-2.5">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                        s.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
+                    <span className={badgeClass(s.active ? "success" : "neutral")}>
                       {s.active ? "Activa" : "Inactiva"}
                     </span>
                   </td>
@@ -55,7 +52,7 @@ export default async function SedesPage() {
                       <input type="hidden" name="active" value={String(s.active)} />
                       <ConfirmSubmitButton
                         confirmMessage={s.active ? `¿Desactivar ${s.name}?` : `¿Reactivar ${s.name}?`}
-                        className="text-xs font-medium text-indigo-700 hover:underline"
+                        className={linkClass(s.active ? "destructive" : "success")}
                       >
                         {s.active ? "Desactivar" : "Activar"}
                       </ConfirmSubmitButton>
@@ -86,10 +83,7 @@ export default async function SedesPage() {
             placeholder="Dirección (opcional)"
             className="rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
           />
-          <button
-            type="submit"
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
-          >
+          <button type="submit" className={buttonClass("primary")}>
             Agregar sede
           </button>
         </form>

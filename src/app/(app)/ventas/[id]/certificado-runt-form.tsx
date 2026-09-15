@@ -5,6 +5,7 @@ import { Upload } from "lucide-react";
 import { subirCertificadoRunt } from "./actions";
 import { formatCOP } from "@/lib/format";
 import { compressImage, formatFileSize } from "@/lib/compress-image";
+import { buttonClass } from "@/lib/ui";
 
 export function CertificadoRuntForm({ ventaId, saldo }: { ventaId: string; saldo: number }) {
   const [state, formAction, pending] = useActionState(subirCertificadoRunt, {});
@@ -85,7 +86,7 @@ export function CertificadoRuntForm({ ventaId, saldo }: { ventaId: string; saldo
       <button
         type="submit"
         disabled={pending || comprimiendo || !puedeSubir}
-        className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 disabled:shadow-none"
+        className={buttonClass("primary")}
       >
         {pending ? "Subiendo..." : "Subir certificado RUNT"}
       </button>

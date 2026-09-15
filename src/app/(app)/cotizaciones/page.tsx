@@ -5,14 +5,9 @@ import { getViewerContext, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { formatCOP, formatDate, formatDateTime } from "@/lib/format";
 import type { EstadoCotizacion } from "@/lib/supabase/types";
+import { badgeClass, buttonClass, ESTADO_COTIZACION_LABEL } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Cotizaciones | Gestia App Conductores" };
-
-const ESTADO_LABEL: Record<string, { label: string; className: string }> = {
-  pendiente: { label: "Pendiente", className: "bg-indigo-100 text-indigo-700" },
-  convertida: { label: "Convertida", className: "bg-emerald-100 text-emerald-700" },
-  rechazada: { label: "Rechazada", className: "bg-slate-100 text-slate-500" },
-};
 
 export default async function CotizacionesPage({
   searchParams,
@@ -52,7 +47,7 @@ export default async function CotizacionesPage({
           <SedeSelect sedes={sedes} currentSedeId={sedeFilter} allowAll={profile.role === "admin"} />
           <Link
             href="/cotizaciones/nueva"
-            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
+            className={buttonClass("primary")}
           >
             <Plus className="h-4 w-4" />
             Nueva cotización
@@ -72,7 +67,7 @@ export default async function CotizacionesPage({
           <option value="convertida">Convertida</option>
           <option value="rechazada">Rechazada</option>
         </select>
-        <button type="submit" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
+        <button type="submit" className={buttonClass("secondary")}>
           Filtrar
         </button>
       </form>
@@ -92,7 +87,7 @@ export default async function CotizacionesPage({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {(cotizaciones ?? []).map((c) => {
-              const estado = ESTADO_LABEL[c.estado] ?? ESTADO_LABEL.pendiente;
+              const estado = ESTADO_COTIZACION_LABEL[c.estado] ?? ESTADO_COTIZACION_LABEL.pendiente;
               const vencida = c.estado === "pendiente" && c.valida_hasta && c.valida_hasta < todayStr;
               return (
                 <tr key={c.id}>
@@ -110,11 +105,11 @@ export default async function CotizacionesPage({
                     {c.valida_hasta ? formatDate(c.valida_hasta) : "—"}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${estado.className}`}>
+                    <span className={badgeClass(estado.tone)}>
                       {estado.label}
                     </span>
                     {vencida ? (
-                      <span className="ml-1.5 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+                      <span className={`ml-1.5 ${badgeClass("danger")}`}>
                         Vencida
                       </span>
                     ) : null}

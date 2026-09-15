@@ -4,6 +4,7 @@ import { getViewerContext } from "@/lib/viewer";
 import { formatCOP, formatDateTime } from "@/lib/format";
 import { METODO_PAGO_LABEL } from "@/lib/supabase/types";
 import { PrintButton } from "@/components/print-button";
+import { badgeClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Cierre de caja | Gestia App Conductores" };
 
@@ -218,11 +219,7 @@ export default async function CierreCajaPage({
                     </td>
                     <td className="py-1.5 pr-2">
                       {venta ? (
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                            esAbono ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-indigo-700"
-                          }`}
-                        >
+                        <span className={badgeClass(esAbono ? "warning" : "info")}>
                           {esAbono ? "Abono" : "Pago inicial"}
                         </span>
                       ) : (

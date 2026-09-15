@@ -5,6 +5,7 @@ import { getViewerContext, requireOpenCaja } from "@/lib/viewer";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { toggleClienteActive } from "./actions";
 import { RuntBadge } from "./runt-badge";
+import { badgeClass, buttonClass, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Clientes | Gestia App Conductores" };
 
@@ -47,7 +48,7 @@ export default async function ClientesPage({
         <h1 className="text-2xl font-semibold text-slate-900">Clientes</h1>
         <Link
           href="/clientes/nuevo"
-          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700"
+          className={buttonClass("primary")}
         >
           <UserPlus className="h-4 w-4" />
           Crear nuevo cliente
@@ -78,7 +79,7 @@ export default async function ClientesPage({
               <th className="px-4 py-3">Huellas</th>
               <th className="px-4 py-3">RUNT</th>
               <th className="px-4 py-3">Estado</th>
-              {profile.role === "admin" ? <th className="px-4 py-3" /> : null}
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -117,45 +118,47 @@ export default async function ClientesPage({
                   <RuntBadge runt={cliente.runt} />
                 </td>
                 <td className="px-4 py-3">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                      cliente.active
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
+                  <span className={badgeClass(cliente.active ? "success" : "neutral")}>
                     {cliente.active ? "Activo" : "Inactivo"}
                   </span>
                 </td>
-                {profile.role === "admin" ? (
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <Link
-                      href={`/clientes/${cliente.id}`}
-                      className="mr-3 text-xs font-medium text-indigo-700 hover:underline"
-                    >
-                      Editar
-                    </Link>
-                    <form action={toggleClienteActive} className="inline">
-                      <input type="hidden" name="id" value={cliente.id} />
-                      <input type="hidden" name="active" value={String(cliente.active)} />
-                      <ConfirmSubmitButton
-                        confirmMessage={
-                          cliente.active
-                            ? `¿Desactivar a ${cliente.nombre_completo}?`
-                            : `¿Reactivar a ${cliente.nombre_completo}?`
-                        }
-                        className="text-xs font-medium text-slate-500 hover:underline"
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <Link
+                    href={`/ventas/nueva?sede=${cliente.sede_id}&cliente=${cliente.id}`}
+                    className={`mr-3 ${linkClass("primary")}`}
+                  >
+                    Crear venta
+                  </Link>
+                  {profile.role === "admin" ? (
+                    <>
+                      <Link
+                        href={`/clientes/${cliente.id}`}
+                        className={`mr-3 ${linkClass("primary")}`}
                       >
-                        {cliente.active ? "Desactivar" : "Activar"}
-                      </ConfirmSubmitButton>
-                    </form>
-                  </td>
-                ) : null}
+                        Editar
+                      </Link>
+                      <form action={toggleClienteActive} className="inline">
+                        <input type="hidden" name="id" value={cliente.id} />
+                        <input type="hidden" name="active" value={String(cliente.active)} />
+                        <ConfirmSubmitButton
+                          confirmMessage={
+                            cliente.active
+                              ? `¿Desactivar a ${cliente.nombre_completo}?`
+                              : `¿Reactivar a ${cliente.nombre_completo}?`
+                          }
+                          className={linkClass(cliente.active ? "destructive" : "success")}
+                        >
+                          {cliente.active ? "Desactivar" : "Activar"}
+                        </ConfirmSubmitButton>
+                      </form>
+                    </>
+                  ) : null}
+                </td>
               </tr>
             ))}
             {(clientes ?? []).length === 0 ? (
               <tr>
-                <td colSpan={profile.role === "admin" ? 9 : 7} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={profile.role === "admin" ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                   {q ? "No hay clientes que coincidan con la búsqueda." : "Todavía no hay clientes cargados."}
                 </td>
               </tr>

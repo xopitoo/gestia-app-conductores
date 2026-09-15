@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { abrirCaja, cerrarCaja, registrarEgreso, type CajaActionState } from "./actions";
 import { METODO_PAGO_LABEL, METODO_PAGO_SELECCIONABLE } from "@/lib/supabase/types";
+import { buttonClass } from "@/lib/ui";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
@@ -33,7 +34,7 @@ export function AbrirCajaForm({ sedeId }: { sedeId: string }) {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={buttonClass("success")}
       >
         {pending ? "Abriendo..." : "Abrir caja"}
       </button>
@@ -62,7 +63,7 @@ export function CerrarCajaForm({ sesionId }: { sesionId: string }) {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className={buttonClass("dark")}
       >
         {pending ? "Cerrando..." : "Cerrar caja"}
       </button>
@@ -103,7 +104,7 @@ export function RegistrarEgresoForm({
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+        className={buttonClass("destructive")}
       >
         {pending ? "Registrando..." : "Registrar egreso"}
       </button>

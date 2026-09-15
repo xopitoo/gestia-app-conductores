@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react";
 import { crearCotizacion } from "./actions";
 import type { ClienteRow, ProductoRow, VentaItemInput } from "@/lib/supabase/types";
 import { formatCOP } from "@/lib/format";
+import { buttonClass } from "@/lib/ui";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
@@ -121,7 +122,7 @@ export function CotizacionForm({
           <button
             type="button"
             onClick={agregarLibre}
-            className="rounded-lg border border-slate-300 px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+            className={buttonClass("secondary")}
           >
             Agregar
           </button>
@@ -184,7 +185,7 @@ export function CotizacionForm({
       <button
         type="submit"
         disabled={pending || items.length === 0}
-        className="mt-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={`mt-1 ${buttonClass("primary")} w-full`}
       >
         {pending ? "Guardando..." : `Crear cotización — ${formatCOP(total)}`}
       </button>

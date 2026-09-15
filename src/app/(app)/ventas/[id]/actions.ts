@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getViewerContext } from "@/lib/viewer";
 import { parsePagos } from "../parse-form-arrays";
+import { adjuntarComprobantes } from "@/lib/comprobante-pago";
 import type { MetodoPago } from "@/lib/supabase/types";
 
 export type AbonoFormState = {
@@ -53,7 +54,7 @@ export async function registrarAbono(
   _prevState: AbonoFormState,
   formData: FormData,
 ): Promise<AbonoFormState> {
-  const { supabase } = await getViewerContext();
+  const { supabase, profile } = await getViewerContext();
   const ventaId = String(formData.get("venta_id") ?? "");
   const pagos = parsePagos(String(formData.get("pagos") ?? "[]"));
 
@@ -61,9 +62,14 @@ export async function registrarAbono(
     return { error: "Registrá al menos un pago." };
   }
 
+  const adjunto = await adjuntarComprobantes(supabase, formData, pagos, profile.organization_id!);
+  if ("error" in adjunto) {
+    return { error: adjunto.error };
+  }
+
   const { error } = await supabase.rpc("registrar_abono", {
     p_venta_id: ventaId,
-    p_pagos: pagos,
+    p_pagos: adjunto.pagos,
   });
 
   if (error) {
@@ -79,6 +85,52 @@ export async function registrarAbono(
   revalidatePath(`/ventas/${ventaId}`);
   revalidatePath("/ventas");
   revalidatePath("/caja");
+  return {};
+}
+
+export type CorregirPrecioTramitadorState = {
+  error?: string;
+};
+
+/**
+ * Corrige el precio especial (lo que le corresponde a la organización) de
+ * una venta ya creada — para cuando queda mal cargado (ej. se editó a mano
+ * por error y quedó en $0). Solo admin, sin límite de tiempo (a diferencia
+ * de corregir_forma_pago_venta, que un recepcionista también puede tocar
+ * mientras la caja siga abierta — esto es plata del tramitador, no del
+ * método de pago, así que queda admin-only siempre).
+ */
+export async function corregirPrecioTramitador(
+  ventaId: string,
+  _prevState: CorregirPrecioTramitadorState,
+  formData: FormData,
+): Promise<CorregirPrecioTramitadorState> {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") {
+    return { error: "No autorizado." };
+  }
+
+  const precioTramitador = Number(formData.get("precio_tramitador") ?? NaN);
+  if (!Number.isFinite(precioTramitador) || precioTramitador < 0) {
+    return { error: "Ingresá un monto válido." };
+  }
+
+  const { error } = await supabase.rpc("corregir_precio_tramitador_venta", {
+    p_venta_id: ventaId,
+    p_precio_tramitador: precioTramitador,
+  });
+
+  if (error) {
+    if (error.message.includes("superar el total")) {
+      return { error: "El precio del tramitador no puede superar el total de la orden." };
+    }
+    return { error: "No se pudo corregir el precio del tramitador." };
+  }
+
+  revalidatePath(`/ventas/${ventaId}`);
+  revalidatePath("/ventas");
+  revalidatePath("/tramitadores");
+  revalidatePath("/dashboard");
   return {};
 }
 
@@ -125,7 +177,7 @@ export async function cruzarSaldoTramitador(
 
   revalidatePath(`/ventas/${ventaId}`);
   revalidatePath("/ventas");
-  revalidatePath("/admin/tramitadores");
+  revalidatePath("/tramitadores");
   return {};
 }
 

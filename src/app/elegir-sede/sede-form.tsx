@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { elegirSede } from "./actions";
 import type { SedeRow } from "@/lib/supabase/types";
+import { buttonClass } from "@/lib/ui";
 
 export function SedeForm({ sedes }: { sedes: SedeRow[] }) {
   const [state, formAction, pending] = useActionState(elegirSede, {});
@@ -33,7 +34,7 @@ export function SedeForm({ sedes }: { sedes: SedeRow[] }) {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className={buttonClass("primary")}
       >
         {pending ? "Guardando..." : "Confirmar sede"}
       </button>

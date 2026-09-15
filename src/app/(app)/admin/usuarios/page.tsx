@@ -5,6 +5,7 @@ import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { toggleUsuarioActive } from "./actions";
 import { UsuarioForm } from "./usuario-form";
 import { CambiarSedeSelect } from "./cambiar-sede-select";
+import { badgeClass, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Usuarios | Gestia App Conductores" };
 
@@ -54,11 +55,7 @@ export default async function UsuariosPage() {
                     )}
                   </td>
                   <td className="px-4 py-2.5">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                        u.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
+                    <span className={badgeClass(u.active ? "success" : "neutral")}>
                       {u.active ? "Activo" : "Inactivo"}
                     </span>
                   </td>
@@ -69,7 +66,7 @@ export default async function UsuariosPage() {
                         <input type="hidden" name="active" value={String(u.active)} />
                         <ConfirmSubmitButton
                           confirmMessage={u.active ? `¿Desactivar a ${u.full_name}?` : `¿Reactivar a ${u.full_name}?`}
-                          className="text-xs font-medium text-indigo-700 hover:underline"
+                          className={linkClass(u.active ? "destructive" : "success")}
                         >
                           {u.active ? "Desactivar" : "Activar"}
                         </ConfirmSubmitButton>
