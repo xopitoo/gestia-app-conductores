@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getViewerContext } from "@/lib/viewer";
 import { formatCOP, formatDateTime } from "@/lib/format";
-import { METODO_PAGO_LABEL } from "@/lib/supabase/types";
+import { METODO_PAGO_LABEL, type MetodoPago } from "@/lib/supabase/types";
+import { METODO_PAGO_STYLE } from "@/lib/metodo-pago-ui";
+import { getSedeBranding } from "@/lib/sede-branding";
 import { PrintButton } from "@/components/print-button";
 import { badgeClass } from "@/lib/ui";
 
@@ -101,11 +103,15 @@ export default async function CierreCajaPage({
   const saldoTeoricoEfectivo = sesion.opening_balance + ingresosEfectivo - egresosEfectivo;
   const diferencia = sesion.closing_balance != null ? sesion.closing_balance - saldoTeoricoEfectivo : null;
 
-  const totalesPorMetodo = new Map<string, number>();
+  // Se guarda por la clave cruda del método (no la etiqueta) para poder
+  // buscarle su color/ícono en METODO_PAGO_STYLE al mostrarlo.
+  const totalesPorMetodo = new Map<MetodoPago, number>();
   for (const m of ingresos) {
-    const label = m.metodo_pago ? (METODO_PAGO_LABEL[m.metodo_pago] ?? m.metodo_pago) : "—";
-    totalesPorMetodo.set(label, (totalesPorMetodo.get(label) ?? 0) + m.monto);
+    const key = (m.metodo_pago ?? "otro") as MetodoPago;
+    totalesPorMetodo.set(key, (totalesPorMetodo.get(key) ?? 0) + m.monto);
   }
+
+  const branding = getSedeBranding(sede?.name, organization.name);
 
   return (
     <div className="flex flex-col items-center gap-4">
@@ -117,18 +123,32 @@ export default async function CierreCajaPage({
         </p>
       </div>
 
-      <div className="w-[8.5in] max-w-full rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-800 print:w-auto print:rounded-none print:border-none print:p-0">
-        {/* Encabezado */}
-        <div className="flex items-start justify-between gap-4 border-b-2 border-slate-800 pb-3">
-          <div>
-            <h1 className="text-lg font-bold text-slate-900">{organization.name}</h1>
-            <p className="text-xs text-slate-500">{sede?.name}</p>
+      <div className="w-[8.5in] max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white text-sm text-slate-800 print:w-auto print:rounded-none print:border-none">
+        <div className="h-1.5 bg-gradient-to-r from-indigo-600 via-sky-500 to-emerald-500 print:hidden" />
+        <div className="p-8 pt-6">
+          {/* Encabezado */}
+          <div className="flex items-start justify-between gap-4 border-b-2 border-slate-800 pb-3">
+            <div>
+              <h1 className="text-xl leading-tight font-bold text-slate-900">{branding.nombre}</h1>
+              <p className="text-xs font-semibold tracking-wide text-indigo-700 uppercase">
+                {branding.subtitulo}
+              </p>
+              {branding.slogan ? (
+                <p className="mt-0.5 text-[11px] text-slate-400 italic">{branding.slogan}</p>
+              ) : null}
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-semibold text-slate-900">Cierre de caja</p>
+              <p className="font-mono text-xs text-slate-400">#{sesion.id.slice(0, 8).toUpperCase()}</p>
+              {branding.telefono || branding.web ? (
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {branding.telefono ? <span>Tel. {branding.telefono}</span> : null}
+                  {branding.telefono && branding.web ? <span> · </span> : null}
+                  {branding.web ? <span>{branding.web}</span> : null}
+                </p>
+              ) : null}
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-sm font-semibold text-slate-900">Cierre de caja</p>
-            <p className="font-mono text-xs text-slate-400">#{sesion.id.slice(0, 8).toUpperCase()}</p>
-          </div>
-        </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3 border-b border-slate-200 pb-3 text-xs">
           <div>
@@ -168,21 +188,38 @@ export default async function CierreCajaPage({
           </div>
         </div>
 
-        {/* Ingresos por método — incluye lo que no es efectivo (transferencia, tarjeta, etc.) */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
-            <span className="font-semibold text-slate-500 uppercase">Por método</span>
-            {[...totalesPorMetodo.entries()].map(([label, monto]) => (
-              <span key={label} className="flex items-center gap-1.5">
-                <span className="text-slate-500">{label}</span>
-                <span className="font-medium text-slate-800">{formatCOP(monto)}</span>
-              </span>
-            ))}
+        {/* Ingresos por método — un chip de color por método (nunca solo el
+            color: siempre lleva ícono + etiqueta + monto) para poder
+            diferenciar de un vistazo cuánto entró en efectivo vs. Nequi vs.
+            transferencia, en vez de una lista de texto plano. */}
+        <div className="mt-4">
+          <p className="mb-2 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Formas de pago</p>
+          <div className="flex flex-wrap items-stretch gap-2 border-b border-slate-200 pb-3">
+            {[...totalesPorMetodo.entries()].map(([metodo, monto]) => {
+              const style = METODO_PAGO_STYLE[metodo] ?? METODO_PAGO_STYLE.otro;
+              const Icon = style.icon;
+              return (
+                <div
+                  key={metodo}
+                  className={`flex items-center gap-2 rounded-xl border ${style.border} ${style.bg} py-1.5 pr-3 pl-2`}
+                >
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${style.iconBg} ${style.text}`}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="leading-tight">
+                    <p className={`text-[9px] font-semibold tracking-wide uppercase ${style.text}`}>
+                      {METODO_PAGO_LABEL[metodo] ?? metodo}
+                    </p>
+                    <p className="text-xs font-bold text-slate-900">{formatCOP(monto)}</p>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="ml-auto flex items-center text-xs">
+              <span className="text-slate-500">Total ingresos/ventas&nbsp;</span>
+              <span className="font-semibold text-slate-900">{formatCOP(totalIngresos)}</span>
+            </div>
           </div>
-          <p className="text-xs">
-            <span className="text-slate-500">Total ingresos (todos los métodos) </span>
-            <span className="font-semibold text-slate-900">{formatCOP(totalIngresos)}</span>
-          </p>
         </div>
 
         {/* Detalle de ingresos */}
@@ -227,8 +264,8 @@ export default async function CierreCajaPage({
                       )}
                     </td>
                     <td className="py-1.5 pr-2 text-slate-500">{venta ? referidoDe(venta) : "—"}</td>
-                    <td className="py-1.5 pr-2 text-slate-500">
-                      {m.metodo_pago ? (METODO_PAGO_LABEL[m.metodo_pago] ?? m.metodo_pago) : "—"}
+                    <td className="py-1.5 pr-2">
+                      <MetodoBadge metodo={m.metodo_pago} />
                     </td>
                     <td className="py-1.5 pl-2 text-right font-medium text-emerald-600">
                       {formatCOP(m.monto)}
@@ -279,8 +316,8 @@ export default async function CierreCajaPage({
                       {formatDateTime(m.created_at).split(", ")[1] ?? formatDateTime(m.created_at)}
                     </td>
                     <td className="py-1.5 pr-2 text-slate-700">{m.concepto}</td>
-                    <td className="py-1.5 pr-2 text-slate-500">
-                      {m.metodo_pago ? (METODO_PAGO_LABEL[m.metodo_pago] ?? m.metodo_pago) : "—"}
+                    <td className="py-1.5 pr-2">
+                      <MetodoBadge metodo={m.metodo_pago} />
                     </td>
                     <td className="py-1.5 pl-2 text-right font-medium text-red-600">
                       −{formatCOP(m.monto)}
@@ -306,11 +343,29 @@ export default async function CierreCajaPage({
           <div className="border-t border-slate-400 pt-1.5 text-slate-500">Recibió</div>
         </div>
 
-        <p className="mt-6 text-center text-[10px] text-slate-400">
-          Comprobante generado por Gestia App Conductores — {formatDateTime(new Date().toISOString())}
-        </p>
+          <p className="mt-6 text-center text-[10px] text-slate-400">
+            Comprobante generado por Gestia App Conductores — {formatDateTime(new Date().toISOString())}
+          </p>
+        </div>
       </div>
     </div>
+  );
+}
+
+/** Badge de método de pago con su color propio — mismo criterio que los
+ * chips de "Por método": ícono + etiqueta, nunca solo color. */
+function MetodoBadge({ metodo }: { metodo: string | null }) {
+  if (!metodo) return <span className="text-slate-400">—</span>;
+  const style = METODO_PAGO_STYLE[metodo as MetodoPago] ?? METODO_PAGO_STYLE.otro;
+  const Icon = style.icon;
+  const label = METODO_PAGO_LABEL[metodo as MetodoPago] ?? metodo;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border ${style.border} ${style.bg} ${style.text} px-2 py-0.5 text-[11px] font-medium`}
+    >
+      <Icon className="h-3 w-3" />
+      {label}
+    </span>
   );
 }
 
