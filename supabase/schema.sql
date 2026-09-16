@@ -904,6 +904,17 @@ begin
     );
   end loop;
 
+  -- Si es una venta de tramitador, cruza en el momento contra cualquier
+  -- saldo a favor que ya tuviera acumulado (ver
+  -- tramitador_cruce_automatico) — así, si esta venta queda con deuda,
+  -- puede saldarse sola sin esperar a que alguien entre al módulo de
+  -- tramitador. Puede dejar esta misma venta en 'pagada', así que se
+  -- vuelve a leer antes de devolverla.
+  if p_tramitador_id is not null then
+    perform public.tramitador_cruce_automatico(p_tramitador_id, p_sede_id);
+    select * into v_venta from public.ventas where id = v_venta.id;
+  end if;
+
   return v_venta;
 end;
 $$;
@@ -982,6 +993,16 @@ begin
   set estado = case when v_pagado_previo + v_monto_nuevo >= (monto - descuento) then 'pagada' else 'abonada' end
   where id = p_venta_id
   returning * into v_venta;
+
+  -- Si esta venta tiene tramitador, este pago pudo haber generado margen
+  -- nuevo (o liberado saldo) — cruza en el momento contra cualquier otra
+  -- venta pendiente del mismo tramitador en esta sede (ver
+  -- tramitador_cruce_automatico). Puede cambiar el estado de ESTA misma
+  -- venta si quedó como la más vieja pendiente, así que se relee.
+  if v_venta.tramitador_id is not null then
+    perform public.tramitador_cruce_automatico(v_venta.tramitador_id, v_venta.sede_id);
+    select * into v_venta from public.ventas where id = p_venta_id;
+  end if;
 
   return v_venta;
 end;
@@ -1079,18 +1100,117 @@ end;
 $$;
 
 -- =========================================================
+-- TRAMITADOR_CRUCE_AUTOMATICO: aplica el saldo a favor que el tramitador
+-- ya tiene acumulado contra sus ventas 'abonada' pendientes en una sede,
+-- de la más vieja a la más nueva, hasta agotar el crédito disponible.
+-- No genera caja_movimientos (no es efectivo real): inserta un
+-- venta_pagos 'cruce_tramitador' + un tramitador_pagos por cada venta que
+-- alcanza a cubrir. Mismo mecanismo que cruzar_saldo_tramitador, pero
+-- recorriendo todas las ventas pendientes de la sede en vez de una sola.
+--
+-- Se llama SOLA desde registrar_venta y registrar_abono cada vez que se
+-- crea o se paga una venta de un tramitador — así los cruces quedan al
+-- día en tiempo real (ej. debe 140.000 por una venta y en la sede ya
+-- tenía 140.000 a favor de otra: se salda sin que nadie tenga que entrar
+-- al módulo de tramitador) en vez de acumularse hasta que alguien haga
+-- "Registrar abono". Ese módulo se reserva para cuando el tramitador
+-- trae efectivo real (ver registrar_abono_tramitador, que reusa esta
+-- misma función para su cruce automático antes de pedir plata nueva).
+--
+-- security invoker: cada insert queda sujeto a la RLS de quien la llama
+-- (heredada de quien llamó a registrar_venta/registrar_abono/etc.), así
+-- un recepcionista solo cruza ventas de su propia sede.
+-- =========================================================
+create or replace function public.tramitador_cruce_automatico(
+  p_tramitador_id uuid,
+  p_sede_id uuid
+)
+returns numeric
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_tramitador public.tramitadores;
+  v_venta record;
+  v_pendiente_venta numeric(12, 2);
+  v_allocar numeric(12, 2);
+  v_saldo_tramitador numeric(12, 2);
+  v_cliente_nombre text;
+  v_total_cruzado numeric(12, 2) := 0;
+begin
+  if p_tramitador_id is null or p_sede_id is null then
+    return 0;
+  end if;
+
+  select * into v_tramitador from public.tramitadores where id = p_tramitador_id;
+  if v_tramitador.id is null then
+    return 0;
+  end if;
+
+  select coalesce(saldo_a_favor, 0) into v_saldo_tramitador
+  from public.tramitadores_saldo(null)
+  where id = p_tramitador_id;
+  v_saldo_tramitador := greatest(coalesce(v_saldo_tramitador, 0), 0);
+
+  if v_saldo_tramitador <= 0 then
+    return 0;
+  end if;
+
+  for v_venta in
+    select v.id, v.monto, v.descuento, v.sede_id, v.cliente_id
+    from public.ventas v
+    where v.tramitador_id = p_tramitador_id
+      and v.sede_id = p_sede_id
+      and v.estado = 'abonada'
+    order by v.created_at asc
+    for update
+  loop
+    exit when v_saldo_tramitador <= 0;
+
+    select (v_venta.monto - v_venta.descuento) - coalesce(sum(monto), 0) into v_pendiente_venta
+      from public.venta_pagos where venta_id = v_venta.id;
+    if v_pendiente_venta <= 0 then
+      continue;
+    end if;
+
+    v_allocar := least(v_saldo_tramitador, v_pendiente_venta);
+
+    select nombre_completo into v_cliente_nombre from public.clientes where id = v_venta.cliente_id;
+
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
+    values (v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, 'cruce_tramitador', auth.uid());
+
+    insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, created_by)
+    values (
+      p_tramitador_id, v_tramitador.organization_id, p_sede_id, v_allocar,
+      'Cruce automático con venta de ' || coalesce(v_cliente_nombre, 'cliente'), auth.uid()
+    );
+
+    update public.ventas
+    set estado = case
+      when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento)
+      then 'pagada' else 'abonada'
+    end
+    where id = v_venta.id;
+
+    v_saldo_tramitador := v_saldo_tramitador - v_allocar;
+    v_total_cruzado := v_total_cruzado + v_allocar;
+  end loop;
+
+  return v_total_cruzado;
+end;
+$$;
+
+-- =========================================================
 -- REGISTRAR_ABONO_TRAMITADOR: cuando el tramitador (no el cliente) es
 -- quien salda lo que debe — ej. trajo 5 personas en el día, ninguna pagó
 -- en el momento, y al cierre él paga los $700.000 acumulados de una vez.
 --
--- Paso 1 (nuevo): si el tramitador ya tiene saldo a favor (le debíamos
--- plata, ej. por comisión de otras ventas), se aplica automáticamente
--- contra sus ventas 'abonada' de esta sede ANTES de pedir efectivo nuevo
--- — mismo mecanismo que cruzar_saldo_tramitador (venta_pagos
--- 'cruce_tramitador' + tramitador_pagos, sin caja_movimientos porque no
--- es plata real), pero recorriendo todas sus ventas pendientes de la
--- sede en vez de una sola. Así, si le debíamos 200.000 y ahora debe
--- 230.000, solo hacen falta 30.000 en efectivo nuevo.
+-- Paso 1: como los cruces ahora corren solos en cada venta/abono (ver
+-- tramitador_cruce_automatico más arriba), acá normalmente ya no queda
+-- crédito para cruzar — se repite solo por si apareció saldo a favor
+-- nuevo justo antes de este abono (ej. otra venta se acaba de pagar).
 --
 -- Paso 2: lo que quede pendiente después del cruce se cubre con p_pagos
 -- (efectivo real, entra a caja) — reparte entre sus ventas 'abonada' de
@@ -1127,8 +1247,6 @@ declare
   v_pago_id uuid;
   v_total_efectivo numeric(12, 2) := 0;
   v_total_cruzado numeric(12, 2) := 0;
-  v_saldo_tramitador numeric(12, 2);
-  v_cliente_nombre text;
 begin
   if p_pagos is null or jsonb_typeof(p_pagos) <> 'array' then
     raise exception 'Formato de pagos inválido';
@@ -1146,53 +1264,7 @@ begin
   end if;
 
   -- Paso 1: cruzar automáticamente el saldo a favor existente.
-  select coalesce(saldo_a_favor, 0) into v_saldo_tramitador
-  from public.tramitadores_saldo(null)
-  where id = p_tramitador_id;
-  v_saldo_tramitador := greatest(coalesce(v_saldo_tramitador, 0), 0);
-
-  if v_saldo_tramitador > 0 then
-    for v_venta in
-      select v.id, v.monto, v.descuento, v.sede_id, v.cliente_id
-      from public.ventas v
-      where v.tramitador_id = p_tramitador_id
-        and v.sede_id = p_sede_id
-        and v.estado = 'abonada'
-      order by v.created_at asc
-      for update
-    loop
-      exit when v_saldo_tramitador <= 0;
-
-      select (v_venta.monto - v_venta.descuento) - coalesce(sum(monto), 0) into v_pendiente_venta
-        from public.venta_pagos where venta_id = v_venta.id;
-      if v_pendiente_venta <= 0 then
-        continue;
-      end if;
-
-      v_allocar := least(v_saldo_tramitador, v_pendiente_venta);
-
-      select nombre_completo into v_cliente_nombre from public.clientes where id = v_venta.cliente_id;
-
-      insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
-      values (v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, 'cruce_tramitador', auth.uid());
-
-      insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, created_by)
-      values (
-        p_tramitador_id, v_tramitador.organization_id, p_sede_id, v_allocar,
-        'Cruce automático con venta de ' || coalesce(v_cliente_nombre, 'cliente'), auth.uid()
-      );
-
-      update public.ventas
-      set estado = case
-        when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento)
-        then 'pagada' else 'abonada'
-      end
-      where id = v_venta.id;
-
-      v_saldo_tramitador := v_saldo_tramitador - v_allocar;
-      v_total_cruzado := v_total_cruzado + v_allocar;
-    end loop;
-  end if;
+  v_total_cruzado := public.tramitador_cruce_automatico(p_tramitador_id, p_sede_id);
 
   -- Paso 2: lo que siga pendiente se cubre con efectivo nuevo (p_pagos).
   if jsonb_array_length(p_pagos) > 0 then
@@ -1410,9 +1482,14 @@ begin
           and vi.producto_id in (select tp.producto_id from public.tramitador_precios tp where tp.tramitador_id = t.id)
       ) referidos on true
       left join lateral (
+        -- 'cruce_tramitador' no es plata nueva de un cliente — es crédito
+        -- que el tramitador ya tenía, reasignado a esta venta. Si se
+        -- contara acá, pagado_clientes subiría exactamente igual que
+        -- pagado_tramitador y el saldo a favor nunca bajaría después de
+        -- cruzarse, permitiendo cruzar el mismo crédito una y otra vez.
         select coalesce(sum(vp.monto), 0) as pagado
         from public.venta_pagos vp
-        where vp.venta_id = v.id
+        where vp.venta_id = v.id and vp.metodo_pago <> 'cruce_tramitador'
       ) pagos on true
       where v.tramitador_id = t.id and v.estado <> 'anulada'
     ) vs
@@ -1501,9 +1578,12 @@ begin
         and vi.producto_id in (select tp.producto_id from public.tramitador_precios tp where tp.tramitador_id = p_tramitador_id)
     ) referidos on true
     left join lateral (
+      -- Mismo criterio que tramitadores_saldo: un cruce no es plata nueva
+      -- del cliente, así que no cuenta acá (el pago_tramitador de abajo ya
+      -- refleja esa salida de crédito).
       select coalesce(sum(vp.monto), 0) as pagado
       from public.venta_pagos vp
-      where vp.venta_id = v.id
+      where vp.venta_id = v.id and vp.metodo_pago <> 'cruce_tramitador'
     ) pagos on true
     where v.tramitador_id = p_tramitador_id and v.estado <> 'anulada'
 
