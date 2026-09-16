@@ -12,14 +12,13 @@ import {
   GraduationCap,
   Handshake,
   LayoutDashboard,
-  LogOut,
   Package,
   ShieldCheck,
   ShoppingBag,
   UserCog,
   Users,
 } from "lucide-react";
-import { iconButtonClass } from "@/lib/ui";
+import { LogoutButton } from "./logout-button";
 
 export const ROLE_LABEL = {
   admin: "Administrador",
@@ -31,11 +30,9 @@ const STORAGE_KEY = "conductores-pos:sidebar-collapsed";
 export function Sidebar({
   role,
   orgName,
-  onLogout,
 }: {
   role: "admin" | "recepcionista";
   orgName: string;
-  onLogout: () => Promise<void>;
 }) {
   // Lazy initializer (no useEffect): evita el "flash" de expandido→contraído
   // que se vería si se leyera localStorage recién después del primer paint.
@@ -145,15 +142,7 @@ export function Sidebar({
           {!collapsed ? (
             <p className="truncate text-xs text-slate-400">{ROLE_LABEL[role]}</p>
           ) : null}
-          <form action={onLogout}>
-            <button
-              type="submit"
-              title="Salir"
-              className={iconButtonClass("sm")}
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </form>
+          <LogoutButton />
         </div>
 
         {!collapsed ? (

@@ -14,9 +14,9 @@ export const metadata: Metadata = { title: "Caja | Gestia App Conductores" };
 export default async function CajaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sede?: string; sesion?: string; abrir?: string; cerrar?: string }>;
+  searchParams: Promise<{ sede?: string; sesion?: string; abrir?: string }>;
 }) {
-  const { sede: sedeParam, sesion: sesionParam, abrir, cerrar } = await searchParams;
+  const { sede: sedeParam, sesion: sesionParam, abrir } = await searchParams;
   const ctx = await getViewerContext();
   const { supabase, profile, sedes } = ctx;
   const sedeId = resolveSedeId(ctx, sedeParam);
@@ -141,12 +141,6 @@ export default async function CajaPage({
       {abrir && !sesionAbierta ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           Abrí la caja para empezar a registrar ventas y clientes.
-        </div>
-      ) : null}
-
-      {cerrar && sesionAbierta ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          Tenés que cerrar la caja antes de salir.
         </div>
       ) : null}
 

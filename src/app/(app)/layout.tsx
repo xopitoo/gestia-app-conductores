@@ -1,4 +1,3 @@
-import { logoutGuarded } from "./logout-action";
 import { getViewerContext } from "@/lib/viewer";
 import { calcularProximosCumpleanos } from "@/lib/cumpleanos";
 import { Sidebar } from "./sidebar";
@@ -42,11 +41,7 @@ export default async function AppLayout({
 
   return (
     <div className="flex min-h-svh gap-3 bg-gradient-to-br from-indigo-100 via-slate-50 to-pink-100 p-3 print:block print:bg-white print:p-0">
-      <Sidebar
-        role={profile.role as "admin" | "recepcionista"}
-        orgName={organization.name}
-        onLogout={logoutGuarded}
-      />
+      <Sidebar role={profile.role as "admin" | "recepcionista"} orgName={organization.name} />
 
       <main className="flex-1 overflow-x-hidden rounded-2xl bg-white/70 shadow-sm shadow-slate-200/70 print:overflow-visible print:rounded-none print:bg-white print:shadow-none">
         <div className="mx-auto max-w-6xl px-6 py-8 print:mx-0 print:max-w-none print:p-0">
