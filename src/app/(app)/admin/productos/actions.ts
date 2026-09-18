@@ -30,6 +30,31 @@ export async function crearProducto(formData: FormData) {
   revalidatePath("/ventas/nueva");
 }
 
+/**
+ * Corrige nombre/descripción/categoría/precio de un producto ya cargado —
+ * antes solo se podía crear o desactivar, así que un error de tipeo (o un
+ * ajuste de precio) obligaba a desactivar y crear uno nuevo. Admin-only,
+ * ya reforzado por la policy productos_update_admin (RLS), esto solo
+ * agrega la forma de llegar a esa acción desde la UI.
+ */
+export async function editarProducto(formData: FormData) {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") return;
+
+  const id = String(formData.get("id") ?? "");
+  const nombre = String(formData.get("nombre") ?? "").trim();
+  const descripcion = String(formData.get("descripcion") ?? "").trim() || null;
+  const precio = Number(formData.get("precio") ?? 0);
+  const categoria = (String(formData.get("categoria") ?? "") || null) as Categoria | null;
+
+  if (!id || !nombre || !(precio >= 0)) return;
+
+  await supabase.from("productos").update({ nombre, descripcion, precio, categoria }).eq("id", id);
+
+  revalidatePath("/admin/productos");
+  revalidatePath("/ventas/nueva");
+}
+
 export async function toggleProductoActive(formData: FormData) {
   const { supabase, profile } = await getViewerContext();
   if (profile.role !== "admin") return;

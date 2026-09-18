@@ -22,18 +22,42 @@ const inputClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
 
 // Agrupa el catálogo por tipo de producto para que la lista de "Precios
-// normal" no quede como un mosaico desordenado — combos y promociones
-// primero (lo que más se vende junto), después exámenes, después
-// impresiones, y al final los trámites sueltos (duplicado, modificación,
-// RUNT). Cada grupo tiene su propio color para que se distingan de un
-// vistazo, no solo por el orden.
-type GrupoProducto = "combos" | "examenes" | "impresiones" | "otros";
+// normal" no quede como un mosaico desordenado. Pensado para varias sedes
+// con catálogos distintos (ej. C.R.C. Valorar vende exámenes médicos,
+// CEAPP Cali vende cursos de conducción) — cada sede solo ve los grupos
+// que de verdad tiene productos, en este orden: combos primero (lo que
+// más se vende junto), después cursos de escuela, médico, licencia,
+// RUNT, refuerzo/práctica, impresiones, y al final los trámites sueltos
+// que no calzan en ningún otro grupo. Cada grupo tiene su propio color
+// para que se distingan de un vistazo, no solo por el orden.
+type GrupoProducto =
+  | "combos"
+  | "escuela"
+  | "medico"
+  | "licencia"
+  | "runt"
+  | "refuerzo"
+  | "impresiones"
+  | "otros";
 
-const GRUPO_ORDEN: GrupoProducto[] = ["combos", "examenes", "impresiones", "otros"];
+const GRUPO_ORDEN: GrupoProducto[] = [
+  "combos",
+  "escuela",
+  "medico",
+  "licencia",
+  "runt",
+  "refuerzo",
+  "impresiones",
+  "otros",
+];
 
 const GRUPO_LABEL: Record<GrupoProducto, string> = {
   combos: "Combos y promociones",
-  examenes: "Exámenes médicos",
+  escuela: "Cursos de escuela",
+  medico: "Médico",
+  licencia: "Licencia",
+  runt: "RUNT",
+  refuerzo: "Refuerzo y práctica",
   impresiones: "Impresiones",
   otros: "Otros trámites",
 };
@@ -45,11 +69,35 @@ const GRUPO_STYLE: Record<GrupoProducto, { badge: string; borderLeft: string; ho
     hover: "hover:border-indigo-300 hover:bg-indigo-50",
     icon: "text-indigo-600",
   },
-  examenes: {
+  escuela: {
+    badge: "bg-sky-100 text-sky-700",
+    borderLeft: "border-l-sky-400",
+    hover: "hover:border-sky-300 hover:bg-sky-50",
+    icon: "text-sky-600",
+  },
+  medico: {
     badge: "bg-emerald-100 text-emerald-700",
     borderLeft: "border-l-emerald-400",
     hover: "hover:border-emerald-300 hover:bg-emerald-50",
     icon: "text-emerald-600",
+  },
+  licencia: {
+    badge: "bg-cyan-100 text-cyan-700",
+    borderLeft: "border-l-cyan-400",
+    hover: "hover:border-cyan-300 hover:bg-cyan-50",
+    icon: "text-cyan-600",
+  },
+  runt: {
+    badge: "bg-violet-100 text-violet-700",
+    borderLeft: "border-l-violet-400",
+    hover: "hover:border-violet-300 hover:bg-violet-50",
+    icon: "text-violet-600",
+  },
+  refuerzo: {
+    badge: "bg-orange-100 text-orange-700",
+    borderLeft: "border-l-orange-400",
+    hover: "hover:border-orange-300 hover:bg-orange-50",
+    icon: "text-orange-600",
   },
   impresiones: {
     badge: "bg-amber-100 text-amber-700",
@@ -65,11 +113,28 @@ const GRUPO_STYLE: Record<GrupoProducto, { badge: string; borderLeft: string; ho
   },
 };
 
+// El orden de los "if" importa: un producto se queda con el primer grupo
+// que calce. "Combo" siempre gana primero (ej. "Médico Combo" es un combo,
+// no un médico suelto) — mismo criterio que ya existía. Los cursos de
+// escuela se detectan por la categoría de licencia (A2/B1/C1) o la
+// palabra "escuela"; ninguna otra categoría usa esas siglas, así que no
+// hay falsos positivos con productos como "Placa de Carro". Se le quitan
+// las tildes al nombre antes de comparar (NFD + strip de diacríticos) para
+// no tener que repetir cada palabra clave con y sin tilde ("MÉDICO" vs
+// "MEDICO", "RUNT MODIFICACIÓN" vs "MODIFICACION").
 function grupoDeProducto(nombre: string): GrupoProducto {
-  const n = nombre.toUpperCase();
-  if (n.includes("COMBO") || n.includes("PROMO")) return "combos";
-  if (n.includes("EXAMEN")) return "examenes";
-  if (n.includes("IMPRESION") || n.includes("IMPRESIÓN")) return "impresiones";
+  const n = nombre
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  if (n.includes("COMBO") || n.includes("PROMO") || n.includes("+")) return "combos";
+  if (/(^|\s)(A2|B1|C1)(\s|$)/.test(n) || n.includes("ESCUELA") || n.includes("RECATEGORIZA") || n.includes("PUBLICO"))
+    return "escuela";
+  if (n.includes("MEDIC") || n.includes("EXAMEN")) return "medico";
+  if (n.includes("LICENCIA") || n.includes("RENOVACION")) return "licencia";
+  if (n.includes("RUNT")) return "runt";
+  if (n.includes("REFUERZO") || n.includes("PRACTICA")) return "refuerzo";
+  if (n.includes("IMPRESION")) return "impresiones";
   return "otros";
 }
 

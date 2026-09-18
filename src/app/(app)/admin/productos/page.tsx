@@ -2,10 +2,9 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { getViewerContext } from "@/lib/viewer";
-import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
-import { formatCOP } from "@/lib/format";
-import { crearProducto, toggleProductoActive } from "./actions";
-import { badgeClass, buttonClass, linkClass } from "@/lib/ui";
+import { crearProducto } from "./actions";
+import { EditarProductoForm } from "./editar-producto-form";
+import { buttonClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Productos | Gestia App Conductores" };
 
@@ -72,29 +71,7 @@ export default async function ProductosPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {g.items.map((p) => (
-                      <tr key={p.id}>
-                        <td className="px-4 py-2.5 font-medium text-slate-800">{p.nombre}</td>
-                        <td className="px-4 py-2.5 text-slate-600">{p.descripcion ?? "—"}</td>
-                        <td className="px-4 py-2.5 text-slate-600 capitalize">{p.categoria ?? "—"}</td>
-                        <td className="px-4 py-2.5 text-slate-600">{formatCOP(p.precio)}</td>
-                        <td className="px-4 py-2.5">
-                          <span className={badgeClass(p.active ? "success" : "neutral")}>
-                            {p.active ? "Activo" : "Inactivo"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          <form action={toggleProductoActive}>
-                            <input type="hidden" name="id" value={p.id} />
-                            <input type="hidden" name="active" value={String(p.active)} />
-                            <ConfirmSubmitButton
-                              confirmMessage={p.active ? `¿Desactivar ${p.nombre}?` : `¿Reactivar ${p.nombre}?`}
-                              className={linkClass(p.active ? "destructive" : "success")}
-                            >
-                              {p.active ? "Desactivar" : "Activar"}
-                            </ConfirmSubmitButton>
-                          </form>
-                        </td>
-                      </tr>
+                      <EditarProductoForm key={p.id} producto={p} />
                     ))}
                   </tbody>
                 </table>
