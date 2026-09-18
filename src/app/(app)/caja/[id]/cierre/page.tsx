@@ -26,18 +26,36 @@ export default async function CierreCajaPage({
 
   if (!sesion) notFound();
 
-  const [{ data: sede }, { data: movimientos }, { data: perfiles }] = await Promise.all([
-    supabase.from("sedes").select("name").eq("id", sesion.sede_id).maybeSingle(),
-    supabase
-      .from("caja_movimientos")
-      .select("id, tipo, concepto, monto, metodo_pago, venta_id, created_at")
-      .eq("caja_sesion_id", id)
-      .order("created_at"),
-    supabase
-      .from("profiles")
-      .select("id, full_name")
-      .in("id", [sesion.opened_by, sesion.closed_by].filter((v): v is string => !!v)),
-  ]);
+  // "Hasta" del cierre: si la caja sigue abierta (se está previsualizando
+  // antes de cerrar), se usa el momento actual en vez de closed_at (null).
+  const cierreHasta = sesion.closed_at ?? new Date().toISOString();
+
+  const [{ data: sede }, { data: movimientos }, { data: perfiles }, { data: ventasPendientesRaw }] =
+    await Promise.all([
+      supabase.from("sedes").select("name").eq("id", sesion.sede_id).maybeSingle(),
+      supabase
+        .from("caja_movimientos")
+        .select("id, tipo, concepto, monto, metodo_pago, venta_id, created_at")
+        .eq("caja_sesion_id", id)
+        .order("created_at"),
+      supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", [sesion.opened_by, sesion.closed_by].filter((v): v is string => !!v)),
+      // Ventas que se crearon durante esta sesión y siguen con saldo
+      // pendiente — ej. un tramitador trajo a alguien y todavía no pagó
+      // nada. No generan ningún caja_movimientos (no entró plata), así que
+      // sin esto quedaban invisibles en el cierre aunque hayan pasado por
+      // esta caja.
+      supabase
+        .from("ventas")
+        .select("id, cliente_id, referido_nombre, tramitador_id, monto, descuento, created_at")
+        .eq("sede_id", sesion.sede_id)
+        .eq("estado", "abonada")
+        .gte("created_at", sesion.opened_at)
+        .lte("created_at", cierreHasta)
+        .order("created_at"),
+    ]);
 
   const ventaIds = [...new Set((movimientos ?? []).map((m) => m.venta_id).filter((v): v is string => !!v))];
   const { data: ventas } =
@@ -48,23 +66,43 @@ export default async function CierreCajaPage({
           .in("id", ventaIds)
       : { data: [] };
 
-  const clienteIds = [...new Set((ventas ?? []).map((v) => v.cliente_id))];
-  const tramitadorIds = [...new Set((ventas ?? []).map((v) => v.tramitador_id).filter((v): v is string => !!v))];
-  const [{ data: clientes }, { data: tramitadoresRows }, { data: todosLosPagos }] = await Promise.all([
-    clienteIds.length > 0
-      ? supabase.from("clientes").select("id, nombre_completo").in("id", clienteIds)
-      : Promise.resolve({ data: [] as { id: string; nombre_completo: string }[] }),
-    tramitadorIds.length > 0
-      ? supabase.from("tramitadores").select("id, nombre").in("id", tramitadorIds)
-      : Promise.resolve({ data: [] as { id: string; nombre: string }[] }),
-    // Se pide el historial COMPLETO de pagos de estas ventas (no solo los de
-    // esta caja) porque un abono de hoy puede completar una venta cuyo
-    // primer pago fue en una sesión de caja anterior — sin esto, ese primer
-    // pago de otro día jamás entraría en la comparación.
-    ventaIds.length > 0
-      ? supabase.from("venta_pagos").select("venta_id, created_at").in("venta_id", ventaIds)
-      : Promise.resolve({ data: [] as { venta_id: string; created_at: string }[] }),
-  ]);
+  const ventasPendientes = ventasPendientesRaw ?? [];
+  const pendienteVentaIds = ventasPendientes.map((v) => v.id);
+
+  const clienteIds = [
+    ...new Set([...(ventas ?? []).map((v) => v.cliente_id), ...ventasPendientes.map((v) => v.cliente_id)]),
+  ];
+  const tramitadorIds = [
+    ...new Set(
+      [...(ventas ?? []), ...ventasPendientes]
+        .map((v) => v.tramitador_id)
+        .filter((v): v is string => !!v),
+    ),
+  ];
+  const [{ data: clientes }, { data: tramitadoresRows }, { data: todosLosPagos }, { data: pagosPendientes }] =
+    await Promise.all([
+      clienteIds.length > 0
+        ? supabase.from("clientes").select("id, nombre_completo").in("id", clienteIds)
+        : Promise.resolve({ data: [] as { id: string; nombre_completo: string }[] }),
+      tramitadorIds.length > 0
+        ? supabase.from("tramitadores").select("id, nombre").in("id", tramitadorIds)
+        : Promise.resolve({ data: [] as { id: string; nombre: string }[] }),
+      // Se pide el historial COMPLETO de pagos de estas ventas (no solo los de
+      // esta caja) porque un abono de hoy puede completar una venta cuyo
+      // primer pago fue en una sesión de caja anterior — sin esto, ese primer
+      // pago de otro día jamás entraría en la comparación.
+      ventaIds.length > 0
+        ? supabase.from("venta_pagos").select("venta_id, created_at").in("venta_id", ventaIds)
+        : Promise.resolve({ data: [] as { venta_id: string; created_at: string }[] }),
+      // Lo ya abonado de las ventas pendientes, para mostrar cuánto falta
+      // (puede no ser $0 si alguien pagó una parte y no completó).
+      pendienteVentaIds.length > 0
+        ? supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", pendienteVentaIds)
+        : Promise.resolve({ data: [] as { venta_id: string; monto: number }[] }),
+    ]);
+
+  const pagadoDePendiente = (ventaId: string) =>
+    (pagosPendientes ?? []).filter((p) => p.venta_id === ventaId).reduce((acc, p) => acc + p.monto, 0);
 
   // Primer momento en que se pagó algo de cada venta — cualquier pago
   // posterior a ese instante es un abono, no el pago inicial.
@@ -293,6 +331,64 @@ export default async function CierreCajaPage({
             ) : null}
           </table>
         </div>
+
+        {/* Ventas pendientes creadas en esta sesión — no generan
+            caja_movimientos (no entró plata), así que sin esto un cliente
+            que llegó por un tramitador y no pagó nada quedaba invisible en
+            el cierre. */}
+        {ventasPendientes.length > 0 ? (
+          <div className="mt-4">
+            <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-amber-600 uppercase">
+              Ventas pendientes de esta sesión
+            </p>
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-300 text-left text-slate-500">
+                  <th className="py-1.5 pr-2 font-medium">Hora</th>
+                  <th className="py-1.5 pr-2 font-medium">Cliente</th>
+                  <th className="py-1.5 pr-2 font-medium">Referido</th>
+                  <th className="py-1.5 pr-2 text-right font-medium">Total</th>
+                  <th className="py-1.5 pr-2 text-right font-medium">Abonado</th>
+                  <th className="py-1.5 pl-2 text-right font-medium">Pendiente</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ventasPendientes.map((v) => {
+                  const pagado = pagadoDePendiente(v.id);
+                  const pendiente = v.monto - v.descuento - pagado;
+                  return (
+                    <tr key={v.id} className="border-b border-slate-100">
+                      <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">
+                        {formatDateTime(v.created_at).split(", ")[1] ?? formatDateTime(v.created_at)}
+                      </td>
+                      <td className="py-1.5 pr-2 font-medium text-slate-800 italic">
+                        {clienteDe(v.cliente_id)}
+                      </td>
+                      <td className="py-1.5 pr-2 text-slate-500">{referidoDe(v)}</td>
+                      <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(v.monto - v.descuento)}</td>
+                      <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(pagado)}</td>
+                      <td className="py-1.5 pl-2 text-right font-semibold text-amber-700">
+                        {formatCOP(pendiente)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-800 font-semibold text-slate-900">
+                  <td colSpan={5} className="py-1.5 pr-2 text-right">
+                    Total pendiente
+                  </td>
+                  <td className="py-1.5 pl-2 text-right text-amber-700">
+                    {formatCOP(
+                      ventasPendientes.reduce((acc, v) => acc + (v.monto - v.descuento - pagadoDePendiente(v.id)), 0),
+                    )}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        ) : null}
 
         {/* Detalle de egresos, solo si hubo */}
         {egresos.length > 0 ? (
