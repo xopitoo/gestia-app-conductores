@@ -83,7 +83,15 @@ export async function registrarVenta(
 export async function anularVenta(formData: FormData) {
   const { supabase } = await getViewerContext();
   const id = String(formData.get("id") ?? "");
+  if (!id) return;
 
-  await supabase.from("ventas").update({ estado: "anulada" }).eq("id", id);
+  // Vía RPC (no un simple .update()) porque anular una venta con
+  // tramitador puede dejar sin respaldo un crédito que ya se le había
+  // cruzado a otra venta suya — anular_venta revisa eso y lo revierte
+  // solo si hace falta (ver tramitador_revertir_credito_negativo).
+  await supabase.rpc("anular_venta", { p_venta_id: id });
+
   revalidatePath("/ventas");
+  revalidatePath("/tramitadores");
+  revalidatePath("/caja");
 }

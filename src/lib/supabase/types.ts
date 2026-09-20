@@ -361,6 +361,7 @@ export type Database = {
         { p_venta_id: string; p_monto: number },
         VentaRow
       >;
+      anular_venta: FunctionDef<{ p_venta_id: string }, VentaRow>;
       registrar_abono_tramitador: FunctionDef<
         { p_tramitador_id: string; p_sede_id: string; p_pagos: VentaPagoInput[] },
         { total_cruzado: number; total_efectivo: number }[]

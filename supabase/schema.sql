@@ -208,6 +208,14 @@ create table if not exists public.tramitador_pagos (
 create index if not exists tramitador_pagos_tramitador_id_idx on public.tramitador_pagos (tramitador_id);
 create index if not exists tramitador_pagos_organization_id_idx on public.tramitador_pagos (organization_id);
 
+-- Enlaza un tramitador_pagos generado por un cruce (cruzar_saldo_tramitador
+-- / tramitador_cruce_automatico) con el venta_pagos 'cruce_tramitador' que
+-- insertó al mismo tiempo — null en pagos de comisión reales (esos no
+-- vienen de ninguna venta puntual). Con este vínculo, si la venta que le
+-- dio origen al crédito se anula después, tramitador_revertir_credito_negativo
+-- puede deshacer exactamente ese cruce (y solo ese) en vez de adivinar.
+alter table public.tramitador_pagos add column if not exists venta_pago_id uuid references public.venta_pagos (id) on delete set null;
+
 -- =========================================================
 -- TRAMITADOR_PRECIOS: precio especial de un tramitador para un producto
 -- puntual (ej. un tramitador puede tener $150.000 para "Examen 1
@@ -1036,6 +1044,7 @@ declare
   v_saldo_pendiente numeric(12, 2);
   v_saldo_tramitador numeric(12, 2);
   v_cliente_nombre text;
+  v_pago_id uuid;
 begin
   if public.current_role() <> 'admin' then
     raise exception 'Solo un administrador puede cruzar el saldo de un tramitador';
@@ -1079,12 +1088,13 @@ begin
   select nombre_completo into v_cliente_nombre from public.clientes where id = v_venta.cliente_id;
 
   insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
-  values (v_venta.id, v_venta.organization_id, v_venta.sede_id, p_monto, 'cruce_tramitador', auth.uid());
+  values (v_venta.id, v_venta.organization_id, v_venta.sede_id, p_monto, 'cruce_tramitador', auth.uid())
+  returning id into v_pago_id;
 
-  insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, created_by)
+  insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, venta_pago_id, created_by)
   values (
     v_venta.tramitador_id, v_venta.organization_id, v_venta.sede_id, p_monto,
-    'Cruce con venta de ' || coalesce(v_cliente_nombre, 'cliente'), auth.uid()
+    'Cruce con venta de ' || coalesce(v_cliente_nombre, 'cliente'), v_pago_id, auth.uid()
   );
 
   update public.ventas
@@ -1137,6 +1147,7 @@ declare
   v_allocar numeric(12, 2);
   v_saldo_tramitador numeric(12, 2);
   v_cliente_nombre text;
+  v_pago_id uuid;
   v_total_cruzado numeric(12, 2) := 0;
 begin
   if p_tramitador_id is null or p_sede_id is null then
@@ -1179,12 +1190,13 @@ begin
     select nombre_completo into v_cliente_nombre from public.clientes where id = v_venta.cliente_id;
 
     insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
-    values (v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, 'cruce_tramitador', auth.uid());
+    values (v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, 'cruce_tramitador', auth.uid())
+    returning id into v_pago_id;
 
-    insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, created_by)
+    insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, venta_pago_id, created_by)
     values (
       p_tramitador_id, v_tramitador.organization_id, p_sede_id, v_allocar,
-      'Cruce automático con venta de ' || coalesce(v_cliente_nombre, 'cliente'), auth.uid()
+      'Cruce automático con venta de ' || coalesce(v_cliente_nombre, 'cliente'), v_pago_id, auth.uid()
     );
 
     update public.ventas
@@ -1199,6 +1211,121 @@ begin
   end loop;
 
   return v_total_cruzado;
+end;
+$$;
+
+-- =========================================================
+-- TRAMITADOR_REVERTIR_CREDITO_NEGATIVO: si el saldo a favor de un
+-- tramitador queda en negativo (ej. se anuló una venta que ya había
+-- generado margen y ese margen ya se había cruzado contra otra venta —
+-- ver anular_venta más abajo), esta función deshace automáticamente los
+-- cruces más recientes de esa sede hasta que el saldo deja de ser
+-- negativo (puede quedar en $0 o levemente positivo, nunca exacto porque
+-- cada cruce se deshace completo, no se parte).
+--
+-- Solo toca tramitador_pagos que tengan venta_pago_id (o sea, que vengan
+-- de un cruce real, nunca de una comisión pagada en efectivo — esa sí
+-- fue plata real que salió de caja, no se puede "deshacer" sola). Al
+-- borrar el venta_pagos vinculado, la venta que se había beneficiado del
+-- cruce vuelve a quedar con su saldo pendiente real, y su estado se
+-- recalcula (puede volver de 'pagada' a 'abonada').
+-- =========================================================
+create or replace function public.tramitador_revertir_credito_negativo(
+  p_tramitador_id uuid,
+  p_sede_id uuid
+)
+returns numeric
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_saldo numeric(12, 2);
+  v_faltante numeric(12, 2);
+  v_pago record;
+  v_venta_id uuid;
+  v_total_revertido numeric(12, 2) := 0;
+begin
+  if p_tramitador_id is null or p_sede_id is null then
+    return 0;
+  end if;
+
+  select coalesce(saldo_a_favor, 0) into v_saldo
+  from public.tramitadores_saldo(null)
+  where id = p_tramitador_id;
+  v_saldo := coalesce(v_saldo, 0);
+
+  if v_saldo >= 0 then
+    return 0;
+  end if;
+
+  v_faltante := -v_saldo;
+
+  for v_pago in
+    select tp.id, tp.monto, tp.venta_pago_id
+    from public.tramitador_pagos tp
+    where tp.tramitador_id = p_tramitador_id
+      and tp.sede_id = p_sede_id
+      and tp.venta_pago_id is not null
+    order by tp.created_at desc
+    for update
+  loop
+    exit when v_faltante <= 0;
+
+    select venta_id into v_venta_id from public.venta_pagos where id = v_pago.venta_pago_id;
+
+    delete from public.venta_pagos where id = v_pago.venta_pago_id;
+    delete from public.tramitador_pagos where id = v_pago.id;
+
+    if v_venta_id is not null then
+      update public.ventas
+      set estado = case
+        when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta_id) >= (monto - descuento)
+        then 'pagada' else 'abonada'
+      end
+      where id = v_venta_id and estado <> 'anulada';
+    end if;
+
+    v_faltante := v_faltante - v_pago.monto;
+    v_total_revertido := v_total_revertido + v_pago.monto;
+  end loop;
+
+  return v_total_revertido;
+end;
+$$;
+
+-- =========================================================
+-- ANULAR_VENTA: reemplaza el simple "update estado='anulada'" que hacía
+-- la app directo — necesario porque anular una venta con tramitador
+-- puede dejar sin respaldo un crédito que ya se le había cruzado a otra
+-- venta suya (ver tramitador_revertir_credito_negativo). Antes esto había
+-- que arreglarlo a mano con SQL cada vez que pasaba.
+-- =========================================================
+drop function if exists public.anular_venta(uuid);
+create or replace function public.anular_venta(p_venta_id uuid)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+begin
+  select * into v_venta from public.ventas where id = p_venta_id for update;
+  if v_venta.id is null then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.estado = 'anulada' then
+    raise exception 'La venta ya está anulada';
+  end if;
+
+  update public.ventas set estado = 'anulada' where id = p_venta_id returning * into v_venta;
+
+  if v_venta.tramitador_id is not null then
+    perform public.tramitador_revertir_credito_negativo(v_venta.tramitador_id, v_venta.sede_id);
+  end if;
+
+  return v_venta;
 end;
 $$;
 
