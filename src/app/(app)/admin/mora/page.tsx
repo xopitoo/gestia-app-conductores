@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getViewerContext, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { formatCOP } from "@/lib/format";
+import { linkClass } from "@/lib/ui";
 import { DescuentoForm } from "./descuento-form";
 
 export const metadata: Metadata = { title: "Clientes en mora | Gestia App Conductores" };
@@ -122,9 +123,12 @@ export default async function MoraPage({
                       {cliente?.telefono ? ` · ${cliente.telefono_pais} ${cliente.telefono}` : ""}
                     </p>
                   </div>
-                  <span className="shrink-0 text-base font-semibold text-amber-600">
-                    {formatCOP(c.totalSaldo)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <Link href={`/clientes/${c.clienteId}/estado-cuenta`} className={linkClass("primary")}>
+                      Estado de cuenta
+                    </Link>
+                    <span className="text-base font-semibold text-amber-600">{formatCOP(c.totalSaldo)}</span>
+                  </div>
                 </div>
 
                 <ul className="mt-1.5 flex flex-col divide-y divide-slate-100">

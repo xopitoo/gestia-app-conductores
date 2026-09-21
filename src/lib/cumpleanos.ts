@@ -67,20 +67,31 @@ export function calcularProximosCumpleanos(
   return resultado.sort((a, b) => a.diasParaCumplir - b.diasParaCumplir);
 }
 
+function mensajeCumpleanos(nombre: string) {
+  return `¡Feliz cumpleaños, ${nombre.split(" ")[0]}! 🎉 Te deseamos un excelente día de parte de todo el equipo.`;
+}
+
 /** Link de WhatsApp con un saludo de cumpleaños pre-armado — wa.me solo
  * acepta dígitos, sin "+" ni espacios. */
 export function whatsappCumpleanosUrl(nombre: string, telefonoPais: string | null, telefono: string | null) {
   if (!telefono) return null;
   const numero = `${telefonoPais ?? ""}${telefono}`.replace(/\D/g, "");
   if (!numero) return null;
-  const mensaje = `¡Feliz cumpleaños, ${nombre.split(" ")[0]}! 🎉 Te deseamos un excelente día de parte de todo el equipo.`;
-  return `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`;
+  return `https://wa.me/${numero}?text=${encodeURIComponent(mensajeCumpleanos(nombre))}`;
+}
+
+/** Link sms: con un saludo de cumpleaños pre-armado — a diferencia de wa.me,
+ * el esquema sms: sí acepta el "+" del indicativo de país. */
+export function smsCumpleanosUrl(nombre: string, telefonoPais: string | null, telefono: string | null) {
+  if (!telefono) return null;
+  const numero = `${telefonoPais ?? ""}${telefono}`.trim();
+  if (!numero) return null;
+  return `sms:${numero}?body=${encodeURIComponent(mensajeCumpleanos(nombre))}`;
 }
 
 /** mailto: con un saludo de cumpleaños pre-armado. */
 export function emailCumpleanosUrl(nombre: string, correo: string | null) {
   if (!correo) return null;
   const asunto = "¡Feliz cumpleaños!";
-  const cuerpo = `Hola ${nombre.split(" ")[0]},\n\n¡Feliz cumpleaños! Te deseamos un excelente día de parte de todo el equipo.`;
-  return `mailto:${correo}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  return `mailto:${correo}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensajeCumpleanos(nombre))}`;
 }

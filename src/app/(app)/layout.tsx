@@ -1,5 +1,6 @@
 import { getViewerContext } from "@/lib/viewer";
 import { calcularProximosCumpleanos } from "@/lib/cumpleanos";
+import { calcularProximosVencimientosLicencia } from "@/lib/licencias";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 
@@ -8,7 +9,7 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { supabase, email, profile, organization } = await getViewerContext();
+  const { supabase, email, profile, organization, sedes } = await getViewerContext();
 
   const initials = profile.full_name
     .trim()
@@ -39,6 +40,25 @@ export default async function AppLayout({
   const { data: clientesConFecha } = await clientesQuery;
   const cumpleanos = calcularProximosCumpleanos(clientesConFecha ?? []);
 
+  // Vencimientos de licencia (particular y/o público) — misma idea que los
+  // cumpleaños: gente que se inscribió en una sede CEAPP o renovó en C.R.C.
+  // Valorar, con la fecha ya calculada sola por actualizar_vencimiento_licencia.
+  let clientesLicenciaQuery = supabase
+    .from("clientes")
+    .select(
+      "id, nombre_completo, sede_id, licencia_particular_vence, licencia_publico_vence, telefono_pais, telefono, correo_electronico",
+    )
+    .eq("active", true)
+    .or("licencia_particular_vence.not.is.null,licencia_publico_vence.not.is.null");
+  if (profile.role === "recepcionista" && profile.sede_id) {
+    clientesLicenciaQuery = clientesLicenciaQuery.eq("sede_id", profile.sede_id);
+  }
+  const { data: clientesConLicencia } = await clientesLicenciaQuery;
+  const sedeValorarId = sedes.find((s) => s.name === "C.R.C. VALORAR")?.id;
+  const vencimientosLicencia = calcularProximosVencimientosLicencia(
+    (clientesConLicencia ?? []).map((c) => ({ ...c, es_valorar: c.sede_id === sedeValorarId })),
+  );
+
   return (
     <div className="flex min-h-svh gap-3 bg-gradient-to-br from-indigo-100 via-slate-50 to-pink-100 p-3 print:block print:bg-white print:p-0">
       <Sidebar role={profile.role as "admin" | "recepcionista"} orgName={organization.name} />
@@ -52,6 +72,7 @@ export default async function AppLayout({
             role={profile.role as "admin" | "recepcionista"}
             pendientesCount={pendientesCount ?? 0}
             cumpleanos={cumpleanos}
+            vencimientosLicencia={vencimientosLicencia}
           />
           {children}
         </div>

@@ -138,6 +138,28 @@ function grupoDeProducto(nombre: string): GrupoProducto {
   return "otros";
 }
 
+// Categorías de licencia colombianas que alimentan el vencimiento de
+// licencia del cliente (ver actualizar_vencimiento_licencia en el schema).
+// Particulares (A1/A2/B1/B2/B3): 10/5/1 años según edad. Públicas
+// (C1/C2/C3): 3/1 años según edad.
+const LICENCIA_CATEGORIAS = ["A1", "A2", "B1", "B2", "B3", "C1", "C2", "C3"] as const;
+
+// Detecta las categorías por el nombre del producto — funciona solo en las
+// sedes CEAPP, cuyos cursos ya se llaman "A2 Cali 2026", etc. C.R.C.
+// Valorar vende "Examen 1/2 categoría" sin decir cuál, así que ahí el
+// admin/recepcionista la elige a mano en la sección de abajo (siempre
+// editable, la detección solo la pre-marca).
+function detectarCategoriasDeItems(itemsActuales: VentaItemInput[]): string[] {
+  const encontradas = new Set<string>();
+  for (const item of itemsActuales) {
+    const n = item.nombre.toUpperCase();
+    for (const cat of LICENCIA_CATEGORIAS) {
+      if (new RegExp(`(^|[^A-Z0-9])${cat}([^A-Z0-9]|$)`).test(n)) encontradas.add(cat);
+    }
+  }
+  return [...encontradas];
+}
+
 export function VentaForm({
   sedeId,
   clientes,
@@ -164,6 +186,21 @@ export function VentaForm({
   const [descuentoValor, setDescuentoValor] = useState(0);
   const [tramitadorId, setTramitadorId] = useState("");
   const [precioTramitador, setPrecioTramitador] = useState(0);
+  const [categoriasLicencia, setCategoriasLicencia] = useState<string[]>([]);
+
+  // Suma al set de categorías las recién detectadas en el carrito (sin
+  // borrar las que el usuario haya destildado a mano) — se llama justo
+  // después de agregar un producto, así un curso de escuela pre-marca su
+  // categoría sola.
+  function sumarCategoriasDetectadas(itemsActuales: VentaItemInput[]) {
+    const detectadas = detectarCategoriasDeItems(itemsActuales);
+    if (detectadas.length === 0) return;
+    setCategoriasLicencia((prev) => [...new Set([...prev, ...detectadas])]);
+  }
+
+  function toggleCategoriaLicencia(cat: string) {
+    setCategoriasLicencia((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]));
+  }
 
   // Si alguno de los productos elegidos tiene un precio puntual para este
   // tramitador (ej. "Examen 2 categorías" vale distinto que "Examen 1
@@ -228,6 +265,7 @@ export function VentaForm({
     const next = [...items, { producto_id: p.id, nombre: p.nombre, precio: p.precio }];
     setItems(next);
     if (tramitadorId) setPrecioTramitador(precioSugerido(tramitadorId, next));
+    sumarCategoriasDetectadas(next);
   }
 
   // Agrega el producto ya cobrando el precio especial del tramitador en vez
@@ -239,6 +277,7 @@ export function VentaForm({
     const next = [...items, { producto_id: p.id, nombre: `${p.nombre} (tramitador)`, precio: precioEspecial }];
     setItems(next);
     setPrecioTramitador(precioSugerido(tramitadorId, next));
+    sumarCategoriasDetectadas(next);
   }
 
   function quitarItem(index: number) {
@@ -263,6 +302,7 @@ export function VentaForm({
       <input type="hidden" name="items" value={JSON.stringify(items)} />
       <input type="hidden" name="descuento_tipo" value={descuentoTipo} />
       <input type="hidden" name="descuento_valor" value={descuentoValor} />
+      <input type="hidden" name="categorias_licencia" value={JSON.stringify(categoriasLicencia)} />
 
       <Field label="Cliente" required>
         <select
@@ -434,6 +474,34 @@ export function VentaForm({
           ) : null}
         </div>
       </section>
+
+      {items.length > 0 ? (
+        <Field label="Categorías de licencia que certifica esta orden (opcional)">
+          <p className="mb-1.5 -mt-1 text-xs text-slate-400">
+            Se detectan solas en cursos de escuela (ej. &quot;A2 Cali 2026&quot;) — en C.R.C. Valorar elegilas a
+            mano. Alimentan el recordatorio de vencimiento de licencia del cliente.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {LICENCIA_CATEGORIAS.map((cat) => {
+              const activa = categoriasLicencia.includes(cat);
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => toggleCategoriaLicencia(cat)}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    activa
+                      ? "border-cyan-500 bg-cyan-50 text-cyan-700"
+                      : "border-slate-300 text-slate-500 hover:border-slate-400"
+                  }`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+      ) : null}
 
       <Field label="Descuento (opcional)">
         <DescuentoPicker

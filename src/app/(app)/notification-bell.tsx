@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, Cake, Mail, MessageCircle } from "lucide-react";
+import { Bell, Cake, IdCard, Mail, MessageCircle } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import { emailCumpleanosUrl, whatsappCumpleanosUrl, type ClienteCumpleanos } from "@/lib/cumpleanos";
+import { emailLicenciaUrl, whatsappLicenciaUrl, type ClienteLicencia } from "@/lib/licencias";
 import { linkClass } from "@/lib/ui";
 
 /**
@@ -17,9 +18,11 @@ import { linkClass } from "@/lib/ui";
 export function NotificationBell({
   pendientesCount,
   cumpleanos,
+  vencimientosLicencia,
 }: {
   pendientesCount: number;
   cumpleanos: ClienteCumpleanos[];
+  vencimientosLicencia: ClienteLicencia[];
 }) {
   const [abierto, setAbierto] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -42,7 +45,9 @@ export function NotificationBell({
 
   const cumpleHoy = cumpleanos.filter((c) => c.diasParaCumplir === 0);
   const cumpleProximos = cumpleanos.filter((c) => c.diasParaCumplir > 0);
-  const totalCount = pendientesCount + cumpleHoy.length;
+  const licenciasVencidas = vencimientosLicencia.filter((l) => l.diasParaVencer < 0);
+  const licenciasPorVencer = vencimientosLicencia.filter((l) => l.diasParaVencer >= 0);
+  const totalCount = pendientesCount + cumpleHoy.length + licenciasVencidas.length;
 
   return (
     <div className="relative" ref={ref}>
@@ -87,6 +92,30 @@ export function NotificationBell({
             </div>
           ) : null}
 
+          {licenciasVencidas.length > 0 ? (
+            <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-red-600 uppercase">
+                <IdCard className="h-3.5 w-3.5" aria-hidden="true" />
+                Licencias vencidas
+              </p>
+              {licenciasVencidas.map((l) => (
+                <LicenciaRow key={`${l.id}-${l.categoria}`} cliente={l} />
+              ))}
+            </div>
+          ) : null}
+
+          {licenciasPorVencer.length > 0 ? (
+            <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-cyan-700 uppercase">
+                <IdCard className="h-3.5 w-3.5" aria-hidden="true" />
+                Licencias por vencer
+              </p>
+              {licenciasPorVencer.map((l) => (
+                <LicenciaRow key={`${l.id}-${l.categoria}`} cliente={l} />
+              ))}
+            </div>
+          ) : null}
+
           <div className="px-4 py-3">
             <p className="mb-1.5 text-xs font-semibold tracking-wide text-slate-400 uppercase">Ventas pendientes</p>
             {pendientesCount > 0 ? (
@@ -102,11 +131,64 @@ export function NotificationBell({
             )}
           </div>
 
-          {cumpleanos.length === 0 && pendientesCount === 0 ? (
+          {cumpleanos.length === 0 && vencimientosLicencia.length === 0 && pendientesCount === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-slate-400">Sin novedades por ahora.</p>
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const CATEGORIA_LICENCIA_LABEL: Record<ClienteLicencia["categoria"], string> = {
+  particular: "Particular",
+  publico: "Público",
+};
+
+function LicenciaRow({ cliente }: { cliente: ClienteLicencia }) {
+  const whatsappUrl = whatsappLicenciaUrl(
+    cliente.nombreCompleto,
+    cliente.telefonoPais,
+    cliente.telefono,
+    cliente.esValorar,
+  );
+  const emailUrl = emailLicenciaUrl(cliente.nombreCompleto, cliente.correoElectronico, cliente.esValorar);
+
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-slate-800">{cliente.nombreCompleto}</p>
+        <p className="text-xs text-slate-400">
+          {CATEGORIA_LICENCIA_LABEL[cliente.categoria]} · {formatDate(cliente.fechaVencimiento)}
+          {cliente.diasParaVencer < 0
+            ? ` · venció hace ${Math.abs(cliente.diasParaVencer)} ${Math.abs(cliente.diasParaVencer) === 1 ? "día" : "días"}`
+            : cliente.diasParaVencer === 0
+              ? " · vence hoy"
+              : ` · vence en ${cliente.diasParaVencer} ${cliente.diasParaVencer === 1 ? "día" : "días"}`}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {whatsappUrl ? (
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Recordar por WhatsApp"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-emerald-600 hover:bg-emerald-50"
+          >
+            <MessageCircle className="h-4 w-4" aria-hidden="true" />
+          </a>
+        ) : null}
+        {emailUrl ? (
+          <a
+            href={emailUrl}
+            title="Recordar por correo"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-indigo-600 hover:bg-indigo-50"
+          >
+            <Mail className="h-4 w-4" aria-hidden="true" />
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }

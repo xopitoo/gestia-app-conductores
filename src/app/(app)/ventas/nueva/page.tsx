@@ -37,7 +37,7 @@ export default async function NuevaVentaPage({
       supabase
         .from("clientes")
         .select(
-          "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, created_by, created_at, updated_at",
+          "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, licencia_particular_vence, licencia_publico_vence, created_by, created_at, updated_at",
         )
         .eq("sede_id", sedeId)
         .eq("active", true)

@@ -1,6 +1,7 @@
 import { ROLE_LABEL } from "./sidebar";
 import { NotificationBell } from "./notification-bell";
 import type { ClienteCumpleanos } from "@/lib/cumpleanos";
+import type { ClienteLicencia } from "@/lib/licencias";
 
 /**
  * Identidad del usuario (foto/iniciales, nombre, correo) + campana de
@@ -16,6 +17,7 @@ export function Topbar({
   role,
   pendientesCount,
   cumpleanos,
+  vencimientosLicencia,
 }: {
   fullName: string;
   email: string | null;
@@ -23,10 +25,15 @@ export function Topbar({
   role: "admin" | "recepcionista";
   pendientesCount: number;
   cumpleanos: ClienteCumpleanos[];
+  vencimientosLicencia: ClienteLicencia[];
 }) {
   return (
     <div className="mb-6 flex items-center justify-end gap-3 print:hidden">
-      <NotificationBell pendientesCount={pendientesCount} cumpleanos={cumpleanos} />
+      <NotificationBell
+        pendientesCount={pendientesCount}
+        cumpleanos={cumpleanos}
+        vencimientosLicencia={vencimientosLicencia}
+      />
 
       <div className="flex min-w-0 items-center gap-2.5 rounded-full bg-slate-50 py-1.5 pr-4 pl-1.5">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">

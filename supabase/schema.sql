@@ -111,6 +111,16 @@ create table if not exists public.clientes (
   unique (organization_id, tipo_documento, numero_documento)
 );
 alter table public.clientes add column if not exists runt boolean not null default false;
+
+-- Vencimiento de licencia — dos fechas separadas porque un mismo cliente
+-- puede tener categorías particulares (A1/A2/B1/B2/B3) y públicas
+-- (C1/C2/C3) con vigencias distintas (ver
+-- actualizar_vencimiento_licencia). Se recalculan solas cada vez que se
+-- registra una venta de un curso/renovación con esas categorías — nunca
+-- se editan a mano.
+alter table public.clientes add column if not exists licencia_particular_vence date;
+alter table public.clientes add column if not exists licencia_publico_vence date;
+
 create index if not exists clientes_organization_id_idx on public.clientes (organization_id);
 create index if not exists clientes_sede_id_idx on public.clientes (sede_id);
 
@@ -295,6 +305,13 @@ alter table public.ventas add column if not exists certificado boolean not null 
 alter table public.ventas add column if not exists certificado_at timestamptz;
 alter table public.ventas add column if not exists certificado_by uuid references public.profiles (id);
 alter table public.ventas add column if not exists certificado_path text;
+-- Categorías de licencia que esta venta certifica/renueva (ej. '{A2,C1}')
+-- — auto-detectadas del nombre de los productos en las sedes CEAPP
+-- (cursos ya se llaman "A2 Cali 2026", etc.), elegidas a mano en C.R.C.
+-- Valorar (sus productos son "Examen 1/2 categoría", no dicen la
+-- categoría). Alimenta actualizar_vencimiento_licencia — null/vacío si la
+-- venta no tiene nada que ver con una licencia (ej. solo una impresión).
+alter table public.ventas add column if not exists categorias_licencia text[];
 -- Tramitador formal (de la tabla tramitadores) — reemplaza al uso de
 -- referido_nombre como texto libre para los casos que sí llevan un precio
 -- especial. referido_nombre se mantiene para historial y para referidos
@@ -751,6 +768,72 @@ as $$
 $$;
 
 -- =========================================================
+-- ACTUALIZAR_VENCIMIENTO_LICENCIA: recalcula la fecha de vencimiento de
+-- licencia de un cliente cuando una venta certifica/renueva categorías
+-- particulares (A1/A2/B1/B2/B3) y/o públicas (C1/C2/C3). Vigencias fijadas
+-- por el usuario (regulación colombiana):
+--   Particular: <60 años = 10 años, 60-80 = 5 años, >80 = 1 año.
+--   Público:    <60 años = 3 años,  60+   = 1 año.
+-- La edad se calcula con fecha_nacimiento del cliente A LA FECHA DE LA
+-- VENTA (no la edad actual). Nunca se edita a mano — solo la toca esta
+-- función, llamada desde registrar_venta.
+-- =========================================================
+create or replace function public.actualizar_vencimiento_licencia(
+  p_cliente_id uuid,
+  p_categorias text[],
+  p_fecha_venta date
+)
+returns void
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_nacimiento date;
+  v_edad int;
+  v_categorias text[];
+  v_tiene_particular boolean;
+  v_tiene_publico boolean;
+  v_vigencia_particular int;
+  v_vigencia_publico int;
+begin
+  if p_categorias is null or array_length(p_categorias, 1) is null then
+    return;
+  end if;
+
+  select fecha_nacimiento into v_nacimiento from public.clientes where id = p_cliente_id;
+  if v_nacimiento is null then
+    return;
+  end if;
+
+  select array_agg(upper(c)) into v_categorias from unnest(p_categorias) as c;
+
+  v_edad := extract(year from age(p_fecha_venta, v_nacimiento));
+
+  v_tiene_particular := v_categorias && array['A1', 'A2', 'B1', 'B2', 'B3'];
+  v_tiene_publico := v_categorias && array['C1', 'C2', 'C3'];
+
+  if v_tiene_particular then
+    v_vigencia_particular := case
+      when v_edad < 60 then 10
+      when v_edad <= 80 then 5
+      else 1
+    end;
+    update public.clientes
+    set licencia_particular_vence = (p_fecha_venta + (v_vigencia_particular || ' years')::interval)::date
+    where id = p_cliente_id;
+  end if;
+
+  if v_tiene_publico then
+    v_vigencia_publico := case when v_edad < 60 then 3 else 1 end;
+    update public.clientes
+    set licencia_publico_vence = (p_fecha_venta + (v_vigencia_publico || ' years')::interval)::date
+    where id = p_cliente_id;
+  end if;
+end;
+$$;
+
+-- =========================================================
 -- REGISTRAR_VENTA: escritura atómica de una orden con VARIOS productos —
 -- venta + venta_items (uno por producto) + movimiento de caja. security
 -- invoker: sigue pasando por las policies normales de abajo, solo
@@ -775,6 +858,7 @@ drop function if exists public.registrar_venta(uuid, uuid, jsonb, text, uuid);
 drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text);
 drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text);
 drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric, text[]);
 
 create or replace function public.registrar_venta(
   p_sede_id uuid,
@@ -787,7 +871,8 @@ create or replace function public.registrar_venta(
   p_descuento_tipo text default null,
   p_descuento_valor numeric default 0,
   p_tramitador_id uuid default null,
-  p_precio_tramitador numeric default 0
+  p_precio_tramitador numeric default 0,
+  p_categorias_licencia text[] default null
 )
 returns public.ventas
 language plpgsql
@@ -871,15 +956,17 @@ begin
 
   insert into public.ventas (
     organization_id, sede_id, cliente_id, concepto, monto, estado, vendedor_id, referido_nombre,
-    descuento, tramitador_id, precio_tramitador, created_by
+    descuento, tramitador_id, precio_tramitador, categorias_licencia, created_by
   )
   values (
     v_org_id, p_sede_id, p_cliente_id, v_concepto, v_monto_total,
     case when v_monto_pagado >= v_monto_neto then 'pagada' else 'abonada' end,
     p_vendedor_id, nullif(trim(p_referido_nombre), ''),
-    v_descuento, p_tramitador_id, p_precio_tramitador, auth.uid()
+    v_descuento, p_tramitador_id, p_precio_tramitador, p_categorias_licencia, auth.uid()
   )
   returning * into v_venta;
+
+  perform public.actualizar_vencimiento_licencia(p_cliente_id, p_categorias_licencia, v_venta.created_at::date);
 
   for v_item in select * from jsonb_array_elements(p_items)
   loop

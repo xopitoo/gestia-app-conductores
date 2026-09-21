@@ -8,6 +8,8 @@ import { DailyChart } from "./daily-chart";
 import { MonthlyYearChart } from "./monthly-year-chart";
 import { PaymentBreakdown } from "./payment-breakdown";
 import { RecepcionistaDashboard } from "./recepcionista-dashboard";
+import { CarteraPorSedeChart } from "./cartera-por-sede-chart";
+import { CarteraAntiguedadChart } from "./cartera-antiguedad-chart";
 import { getTramitadoresConSaldo } from "@/lib/tramitador-saldo";
 
 export const metadata: Metadata = { title: "Dashboard | Gestia App Conductores" };
@@ -176,6 +178,59 @@ export default async function DashboardPage({
     return acc + (v.monto - v.descuento - pagado);
   }, 0);
 
+  // Cartera pendiente de alumnos de escuela — siempre las sedes CEAPP
+  // juntas (nunca C.R.C. Valorar, que no vende cursos), sin importar el
+  // selector de sede de arriba: el objetivo acá es justo comparar entre
+  // sedes, no filtrar a una sola.
+  const sedesEscuela = sedes.filter((s) => s.name !== "C.R.C. VALORAR");
+  const sedeEscuelaIds = sedesEscuela.map((s) => s.id);
+  const { data: carteraVentas } = sedeEscuelaIds.length
+    ? await supabase
+        .from("ventas")
+        .select("id, sede_id, cliente_id, monto, descuento, created_at")
+        .eq("estado", "abonada")
+        .in("sede_id", sedeEscuelaIds)
+    : { data: [] as { id: string; sede_id: string; cliente_id: string; monto: number; descuento: number; created_at: string }[] };
+
+  const carteraVentaIds = (carteraVentas ?? []).map((v) => v.id);
+  const { data: carteraPagos } = carteraVentaIds.length
+    ? await supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", carteraVentaIds)
+    : { data: [] as { venta_id: string; monto: number }[] };
+  const pagadoDeCarteraVenta = (id: string) =>
+    (carteraPagos ?? []).filter((p) => p.venta_id === id).reduce((acc, p) => acc + p.monto, 0);
+
+  const ANTIGUEDAD_BUCKETS = ["0-15 días", "16-30 días", "31-60 días", "61+ días"] as const;
+  const carteraPorSedeMap = new Map<string, { monto: number; clientes: Set<string> }>();
+  const carteraAntiguedadMap = new Map<string, { monto: number; ordenes: number }>(
+    ANTIGUEDAD_BUCKETS.map((b) => [b, { monto: 0, ordenes: 0 }]),
+  );
+
+  for (const v of carteraVentas ?? []) {
+    const saldo = v.monto - v.descuento - pagadoDeCarteraVenta(v.id);
+    if (saldo <= 0) continue;
+
+    const porSede = carteraPorSedeMap.get(v.sede_id) ?? { monto: 0, clientes: new Set<string>() };
+    porSede.monto += saldo;
+    porSede.clientes.add(v.cliente_id);
+    carteraPorSedeMap.set(v.sede_id, porSede);
+
+    const dias = Math.floor((hoy.getTime() - new Date(v.created_at).getTime()) / (1000 * 60 * 60 * 24));
+    const bucket =
+      dias <= 15 ? ANTIGUEDAD_BUCKETS[0] : dias <= 30 ? ANTIGUEDAD_BUCKETS[1] : dias <= 60 ? ANTIGUEDAD_BUCKETS[2] : ANTIGUEDAD_BUCKETS[3];
+    const antiguedad = carteraAntiguedadMap.get(bucket)!;
+    antiguedad.monto += saldo;
+    antiguedad.ordenes += 1;
+  }
+
+  const carteraPorSede = sedesEscuela
+    .map((s) => {
+      const datos = carteraPorSedeMap.get(s.id);
+      return { sedeId: s.id, sedeNombre: s.name, monto: datos?.monto ?? 0, alumnos: datos?.clientes.size ?? 0 };
+    })
+    .sort((a, b) => b.monto - a.monto);
+  const carteraAntiguedad = ANTIGUEDAD_BUCKETS.map((b) => ({ bucket: b, ...carteraAntiguedadMap.get(b)! }));
+  const carteraTotalEscuela = carteraPorSede.reduce((acc, s) => acc + s.monto, 0);
+
   // Cursos vendidos y ranking: por producto/ítem, no por venta (una venta
   // puede tener varios cursos).
   const ventaIdsAnios = (ventasAnios ?? []).map((v) => v.id);
@@ -306,6 +361,21 @@ export default async function DashboardPage({
               </p>
             ) : null}
           </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="mb-4 flex items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-800">Cartera de escuela — por sede</h2>
+            <span className="text-xs font-semibold text-amber-600">{formatCOP(carteraTotalEscuela)}</span>
+          </div>
+          <CarteraPorSedeChart sedes={carteraPorSede} />
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 className="mb-4 text-sm font-semibold text-slate-800">Cartera de escuela — antigüedad</h2>
+          <CarteraAntiguedadChart buckets={carteraAntiguedad} />
         </div>
       </div>
 

@@ -58,6 +58,10 @@ export type ClienteRow = {
   /** Inscrito en el RUNT (Registro Único Nacional de Tránsito). */
   runt: boolean;
   active: boolean;
+  /** Vencimiento de licencia para categorías particulares (A1/A2/B1/B2/B3) — se recalcula solo, ver actualizar_vencimiento_licencia. */
+  licencia_particular_vence: string | null;
+  /** Vencimiento de licencia para categorías públicas (C1/C2/C3) — se recalcula solo, ver actualizar_vencimiento_licencia. */
+  licencia_publico_vence: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -192,6 +196,8 @@ export type VentaRow = {
   certificado_by: string | null;
   /** Ruta del archivo en el bucket privado `certificados-runt`. */
   certificado_path: string | null;
+  /** Categorías de licencia (A1/A2/B1/B2/B3/C1/C2/C3) que esta venta certifica/renueva — alimenta el vencimiento de licencia del cliente. Null si la venta no tiene nada que ver con una licencia. */
+  categorias_licencia: string[] | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -347,6 +353,7 @@ export type Database = {
           p_descuento_valor?: number;
           p_tramitador_id?: string | null;
           p_precio_tramitador?: number;
+          p_categorias_licencia?: string[] | null;
         },
         VentaRow
       >;

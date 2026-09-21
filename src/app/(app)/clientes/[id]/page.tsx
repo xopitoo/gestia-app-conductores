@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ShoppingBag } from "lucide-react";
+import { ArrowLeft, FileText, ShoppingBag } from "lucide-react";
 import { getViewerContext, requireOpenCaja } from "@/lib/viewer";
 import { actualizarCliente } from "../actions";
 import { ClienteForm } from "../cliente-form";
 import { RuntBadge } from "../runt-badge";
 import { RuntConsultaLink } from "@/components/runt-link";
 import { buttonClass } from "@/lib/ui";
+import { formatDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Cliente | Gestia App Conductores" };
 
@@ -33,7 +34,7 @@ export default async function ClienteDetailPage({
   const { data: cliente } = await supabase
     .from("clientes")
     .select(
-      "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, created_by, created_at, updated_at",
+      "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, licencia_particular_vence, licencia_publico_vence, created_by, created_at, updated_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -63,6 +64,10 @@ export default async function ClienteDetailPage({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <RuntConsultaLink documento={`${cliente.tipo_documento} ${cliente.numero_documento}`} />
+            <Link href={`/clientes/${cliente.id}/estado-cuenta`} className={buttonClass("secondary")}>
+              <FileText className="h-4 w-4" />
+              Estado de cuenta
+            </Link>
             <Link
               href={`/ventas/nueva?sede=${cliente.sede_id}&cliente=${cliente.id}`}
               className={buttonClass("primary")}
@@ -73,6 +78,23 @@ export default async function ClienteDetailPage({
           </div>
         </div>
       </div>
+
+      {cliente.licencia_particular_vence || cliente.licencia_publico_vence ? (
+        <div className="flex max-w-2xl flex-wrap gap-3">
+          {cliente.licencia_particular_vence ? (
+            <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-3.5 py-2.5 text-xs">
+              <p className="font-semibold text-cyan-800">Licencia particular vence</p>
+              <p className="text-cyan-700">{formatDate(cliente.licencia_particular_vence)}</p>
+            </div>
+          ) : null}
+          {cliente.licencia_publico_vence ? (
+            <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-3.5 py-2.5 text-xs">
+              <p className="font-semibold text-cyan-800">Licencia público vence</p>
+              <p className="text-cyan-700">{formatDate(cliente.licencia_publico_vence)}</p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {profile.role === "admin" ? (
         <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">

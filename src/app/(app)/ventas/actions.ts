@@ -27,6 +27,15 @@ export async function registrarVenta(
   const descuentoValor = Number(formData.get("descuento_valor") ?? 0) || 0;
   const tramitadorId = String(formData.get("tramitador_id") ?? "") || null;
   const precioTramitador = Number(formData.get("precio_tramitador") ?? 0) || 0;
+  const categoriasLicenciaRaw = String(formData.get("categorias_licencia") ?? "[]");
+  const categoriasLicencia: string[] = (() => {
+    try {
+      const parsed = JSON.parse(categoriasLicenciaRaw);
+      return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === "string") : [];
+    } catch {
+      return [];
+    }
+  })();
 
   if (!sedeId || !clienteId) {
     return { error: "Completá el cliente." };
@@ -54,6 +63,7 @@ export async function registrarVenta(
     p_descuento_valor: descuentoValor,
     p_tramitador_id: tramitadorId,
     p_precio_tramitador: precioTramitador,
+    p_categorias_licencia: categoriasLicencia.length > 0 ? categoriasLicencia : null,
   });
 
   if (error) {
