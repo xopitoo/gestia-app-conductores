@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { getViewerContext } from "@/lib/viewer";
 import { getTramitadoresConSaldo } from "@/lib/tramitador-saldo";
-import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { formatCOP } from "@/lib/format";
-import { crearTramitador, toggleTramitadorActive } from "./actions";
+import { crearTramitador } from "./actions";
 import { AbonoTramitadorForm } from "./abono-tramitador-form";
 import { ComisionTramitadorForm } from "./comision-tramitador-form";
 import { ExtractoModal } from "./extracto-modal";
 import { PreciosProductoForm } from "./precios-producto-form";
-import { badgeClass, buttonClass, linkClass } from "@/lib/ui";
+import { TramitadorHeader } from "./tramitador-header";
+import { buttonClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Tramitadores | Gestia App Conductores" };
 
@@ -143,48 +143,24 @@ export default async function TramitadoresPage() {
         <div className="flex flex-col gap-3">
           {filas.map((t) => (
             <div key={t.id} className="rounded-xl border border-slate-200 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-slate-900">{t.nombre}</h3>
-                    <span className={badgeClass(t.active ? "success" : "neutral")}>
-                      {t.active ? "Activo" : "Inactivo"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    {sedeName(t.sede_id)} · Precio especial {formatCOP(t.precio_especial)} · {t.personas}{" "}
-                    {t.personas === 1 ? "persona" : "personas"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Pagado por sus clientes {formatCOP(t.pagadoClientes)} · Le corresponde a la organización{" "}
-                    {formatCOP(t.reclamo)} · Ya se le pagó {formatCOP(t.pagadoTramitador)}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <span
-                    className={`text-lg font-semibold ${
-                      t.saldoAFavor > 0
-                        ? "text-amber-600"
-                        : t.saldoAFavor < 0
-                          ? "text-red-600"
-                          : "text-emerald-600"
-                    }`}
-                  >
-                    {formatCOP(t.saldoAFavor)}
-                  </span>
-                  {isAdmin ? (
-                    <form action={toggleTramitadorActive}>
-                      <input type="hidden" name="id" value={t.id} />
-                      <input type="hidden" name="active" value={String(t.active)} />
-                      <ConfirmSubmitButton
-                        confirmMessage={t.active ? `¿Desactivar ${t.nombre}?` : `¿Reactivar ${t.nombre}?`}
-                        className={linkClass(t.active ? "destructive" : "success")}
-                      >
-                        {t.active ? "Desactivar" : "Activar"}
-                      </ConfirmSubmitButton>
-                    </form>
-                  ) : null}
-                </div>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <TramitadorHeader
+                  tramitador={{
+                    id: t.id,
+                    nombre: t.nombre,
+                    sedeId: t.sede_id,
+                    precioEspecial: t.precio_especial,
+                    active: t.active,
+                  }}
+                  sedes={sedes}
+                  isAdmin={isAdmin}
+                  sedeNombre={sedeName(t.sede_id)}
+                  personas={t.personas}
+                  saldoAFavor={t.saldoAFavor}
+                  pagadoClientes={t.pagadoClientes}
+                  reclamo={t.reclamo}
+                  pagadoTramitador={t.pagadoTramitador}
+                />
               </div>
               {t.saldoAFavor < 0 ? (
                 <p className="mt-2 text-xs text-red-600">

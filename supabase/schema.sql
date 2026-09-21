@@ -1619,6 +1619,49 @@ end;
 $$;
 
 -- =========================================================
+-- ELIMINAR_TRAMITADOR: borrado real (no solo desactivar) de un tramitador
+-- que nunca llegó a tener actividad de verdad — exige el PIN de
+-- autorización (mismo mecanismo que las ventas con <50% de pago inicial)
+-- y se niega si ya tiene ventas o pagos de comisión registrados, para no
+-- perder historial financiero por accidente. Si ya tiene actividad, la
+-- opción es desactivarlo (toggleTramitadorActive), no borrarlo.
+-- =========================================================
+create or replace function public.eliminar_tramitador(
+  p_tramitador_id uuid,
+  p_pin text
+)
+returns void
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_ventas_count int;
+  v_pagos_count int;
+begin
+  if public.current_role() <> 'admin' then
+    raise exception 'Solo un administrador puede eliminar tramitadores';
+  end if;
+  if not public.verify_org_pin(p_pin) then
+    raise exception 'PIN de autorización incorrecto';
+  end if;
+
+  select count(*) into v_ventas_count from public.ventas where tramitador_id = p_tramitador_id;
+  if v_ventas_count > 0 then
+    raise exception 'Este tramitador ya tiene % ventas registradas — desactivalo en vez de eliminarlo', v_ventas_count;
+  end if;
+
+  select count(*) into v_pagos_count from public.tramitador_pagos where tramitador_id = p_tramitador_id;
+  if v_pagos_count > 0 then
+    raise exception 'Este tramitador ya tiene pagos de comisión registrados — desactivalo en vez de eliminarlo';
+  end if;
+
+  delete from public.tramitador_precios where tramitador_id = p_tramitador_id;
+  delete from public.tramitadores where id = p_tramitador_id;
+end;
+$$;
+
+-- =========================================================
 -- TRAMITADORES_SALDO: el saldo a favor de cada tramitador activo visible en
 -- una sede (mismo criterio que el picker de venta-form: sede_id null =
 -- todas las sedes, o puntual). p_sede_id en null significa "todas las
@@ -2543,6 +2586,15 @@ create policy "tramitadores_update_admin" on public.tramitadores
   for update
   using (public.current_role() = 'admin' and organization_id = public.current_org_id())
   with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- delete: solo admin, y solo a través de eliminar_tramitador (exige PIN y
+-- bloquea el borrado si ya tiene ventas/pagos — ver esa función más abajo).
+-- La policy por sí sola no alcanza a exigir el PIN, por eso nadie borra la
+-- tabla directo desde el cliente.
+drop policy if exists "tramitadores_delete_admin" on public.tramitadores;
+create policy "tramitadores_delete_admin" on public.tramitadores
+  for delete
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id());
 
 -- tramitador_pagos: admin ve/paga cualquiera, org-wide. Un recepcionista
 -- también puede ver y registrar pagos, pero solo a los tramitadores de su

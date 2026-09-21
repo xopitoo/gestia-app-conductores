@@ -40,6 +40,70 @@ export async function crearTramitador(formData: FormData) {
   revalidatePath("/ventas/nueva");
 }
 
+/**
+ * Corrige nombre/sede/precio especial de un tramitador ya cargado — mismo
+ * criterio que editarProducto: solo admin, sin PIN (no es destructivo, se
+ * puede volver a corregir).
+ */
+export async function editarTramitador(formData: FormData) {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") return;
+
+  const id = String(formData.get("id") ?? "");
+  const nombre = String(formData.get("nombre") ?? "").trim();
+  const precioEspecial = Number(formData.get("precio_especial") ?? 0);
+  const sedeId = String(formData.get("sede_id") ?? "") || null;
+
+  if (!id || !nombre || !(precioEspecial >= 0)) return;
+
+  await supabase
+    .from("tramitadores")
+    .update({ nombre, precio_especial: precioEspecial, sede_id: sedeId })
+    .eq("id", id);
+
+  revalidatePath("/tramitadores");
+  revalidatePath("/ventas/nueva");
+}
+
+export type EliminarTramitadorState = {
+  error?: string;
+};
+
+/**
+ * Borrado real (no desactivar) — exige el PIN de autorización de la
+ * organización. La función en la base de datos se niega sola si el
+ * tramitador ya tiene ventas o pagos de comisión, así que ese caso siempre
+ * vuelve acá como error en vez de borrar historial financiero.
+ */
+export async function eliminarTramitador(
+  _prevState: EliminarTramitadorState,
+  formData: FormData,
+): Promise<EliminarTramitadorState> {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") return { error: "Solo un administrador puede eliminar tramitadores." };
+
+  const id = String(formData.get("id") ?? "");
+  const pin = String(formData.get("pin") ?? "");
+  if (!id) return { error: "Falta el tramitador." };
+  if (!pin) return { error: "Ingresá el PIN de autorización." };
+
+  const { error } = await supabase.rpc("eliminar_tramitador", { p_tramitador_id: id, p_pin: pin });
+
+  if (error) {
+    if (error.message.includes("PIN")) {
+      return { error: "PIN de autorización incorrecto." };
+    }
+    if (error.message.includes("ventas registradas") || error.message.includes("pagos de comisión")) {
+      return { error: error.message };
+    }
+    return { error: "No se pudo eliminar el tramitador." };
+  }
+
+  revalidatePath("/tramitadores");
+  revalidatePath("/ventas/nueva");
+  return {};
+}
+
 export async function toggleTramitadorActive(formData: FormData) {
   const { supabase, profile } = await getViewerContext();
   if (profile.role !== "admin") return;

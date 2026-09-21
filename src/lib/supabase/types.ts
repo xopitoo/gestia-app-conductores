@@ -383,6 +383,7 @@ export type Database = {
         },
         TramitadorPagoRow
       >;
+      eliminar_tramitador: FunctionDef<{ p_tramitador_id: string; p_pin: string }, null>;
       tramitadores_saldo: FunctionDef<
         { p_sede_id: string | null },
         {
