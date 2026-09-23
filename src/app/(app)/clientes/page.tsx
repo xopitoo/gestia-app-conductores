@@ -3,11 +3,14 @@ import Link from "next/link";
 import { Fingerprint, Search, UserPlus } from "lucide-react";
 import { getViewerContext, requireOpenCaja } from "@/lib/viewer";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { Pagination } from "@/components/pagination";
 import { toggleClienteActive } from "./actions";
 import { RuntBadge } from "./runt-badge";
 import { badgeClass, buttonClass, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Clientes | Gestia App Conductores" };
+
+const PAGE_SIZE = 15;
 
 const TIPO_LABEL: Record<string, string> = {
   CC: "Cédula de ciudadanía",
@@ -21,25 +24,32 @@ const TIPO_LABEL: Record<string, string> = {
 export default async function ClientesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
-  const { q } = await searchParams;
+  const { q, page: pageParam } = await searchParams;
   const ctx = await getViewerContext();
   await requireOpenCaja(ctx);
   const { supabase, profile, sedes } = ctx;
+
+  const page = Math.max(1, Number(pageParam) || 1);
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
 
   let query = supabase
     .from("clientes")
     .select(
       "id, sede_id, tipo_documento, numero_documento, nombre_completo, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active",
+      { count: "exact" },
     )
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(from, to);
 
   if (q) {
     query = query.or(`nombre_completo.ilike.%${q}%,numero_documento.ilike.%${q}%`);
   }
 
-  const { data: clientes } = await query;
+  const { data: clientes, count } = await query;
+  const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const sedeName = (id: string) => sedes.find((s) => s.id === id)?.name ?? "—";
 
   return (
@@ -166,6 +176,8 @@ export default async function ClientesPage({
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} totalPages={totalPages} basePath="/clientes" searchParams={{ q }} />
     </div>
   );
 }

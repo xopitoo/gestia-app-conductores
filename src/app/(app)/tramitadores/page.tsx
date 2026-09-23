@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Search } from "lucide-react";
 import { getViewerContext } from "@/lib/viewer";
 import { getTramitadoresConSaldo } from "@/lib/tramitador-saldo";
 import { formatCOP } from "@/lib/format";
@@ -12,7 +13,12 @@ import { buttonClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Tramitadores | Gestia App Conductores" };
 
-export default async function TramitadoresPage() {
+export default async function TramitadoresPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const { q } = await searchParams;
   const { profile, supabase, sedes } = await getViewerContext();
   const isAdmin = profile.role === "admin";
 
@@ -25,6 +31,9 @@ export default async function TramitadoresPage() {
     .order("nombre");
   if (!isAdmin && profile.sede_id) {
     tramitadoresQuery = tramitadoresQuery.or(`sede_id.is.null,sede_id.eq.${profile.sede_id}`);
+  }
+  if (q) {
+    tramitadoresQuery = tramitadoresQuery.ilike("nombre", `%${q}%`);
   }
   const { data: tramitadores } = await tramitadoresQuery;
 
@@ -139,6 +148,18 @@ export default async function TramitadoresPage() {
         <p className="mt-2 text-2xl font-semibold text-amber-600">{formatCOP(totalPendiente)}</p>
       </div>
 
+      <form className="flex max-w-md items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Buscar tramitador por nombre..."
+            className="w-full rounded-lg border border-slate-300 py-2.5 pr-3 pl-9 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+          />
+        </div>
+      </form>
+
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <div className="flex flex-col gap-3">
           {filas.map((t) => (
@@ -215,7 +236,9 @@ export default async function TramitadoresPage() {
             </div>
           ))}
           {filas.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">Todavía no hay tramitadores cargados.</p>
+            <p className="py-6 text-center text-sm text-slate-400">
+              {q ? "No hay tramitadores que coincidan con la búsqueda." : "Todavía no hay tramitadores cargados."}
+            </p>
           ) : null}
         </div>
 

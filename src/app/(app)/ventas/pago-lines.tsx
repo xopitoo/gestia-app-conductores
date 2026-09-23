@@ -25,11 +25,17 @@ const inputClass =
 export function PagoLines({
   total,
   allowPin = false,
+  metodos = METODO_PAGO_SELECCIONABLE,
+  metodosConComprobante = METODO_PAGO_CON_COMPROBANTE,
 }: {
   /** Monto que se espera cubrir (total de la orden, o saldo pendiente en un abono). */
   total: number;
   /** Si true, muestra el campo de PIN cuando el pago cae por debajo del 50%. */
   allowPin?: boolean;
+  /** Restringe qué métodos se pueden elegir — por defecto, todos los de venta (ver METODO_PAGO_TRAMITADOR para el subconjunto de tramitadores). */
+  metodos?: MetodoPago[];
+  /** Restringe en cuáles se ofrece adjuntar comprobante — por defecto, los de venta. */
+  metodosConComprobante?: MetodoPago[];
 }) {
   const [pagos, setPagos] = useState<VentaPagoInput[]>([
     { monto: total, metodo_pago: "efectivo" },
@@ -123,7 +129,7 @@ export function PagoLines({
               onChange={(e) => actualizar(i, "metodo_pago", e.target.value)}
               className={inputClass}
             >
-              {METODO_PAGO_SELECCIONABLE.map((value) => (
+              {metodos.map((value) => (
                 <option key={value} value={value}>
                   {METODO_PAGO_LABEL[value]}
                 </option>
@@ -152,7 +158,7 @@ export function PagoLines({
             )}
           </div>
 
-          {METODO_PAGO_CON_COMPROBANTE.includes(p.metodo_pago) ? (
+          {metodosConComprobante.includes(p.metodo_pago) ? (
             <label className="flex w-fit cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-400 hover:text-indigo-700">
               {comprobantes[i] ? (
                 <FileCheck2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden="true" />

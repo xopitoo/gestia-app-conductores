@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, Lock, LockOpen, ShoppingBag, UserPlus } from "lucide-react";
 import { formatCOP, formatDate, formatTime } from "@/lib/format";
+import { VentasHoyMotivador } from "./ventas-hoy-motivador";
 
 export type FilaVentaHoy = {
   id: string;
@@ -63,6 +64,8 @@ export function RecepcionistaDashboard({
         <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
         <p className="mt-1 text-sm text-slate-500">Ventas de hoy, {formatDate(hoy)}</p>
       </div>
+
+      <VentasHoyMotivador cantidad={ventas.length} />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Link

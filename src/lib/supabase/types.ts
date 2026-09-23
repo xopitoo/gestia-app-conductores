@@ -155,6 +155,14 @@ export const METODO_PAGO_CON_COMPROBANTE: MetodoPago[] = [
   "brilla",
   "sistecredito",
 ];
+
+/** Formas de pago que se manejan con un tramitador (pagarle su comisión, o
+ * que él salde lo que debe) — subconjunto más chico que el de ventas: la
+ * organización solo trabaja con estas 4 con ellos. */
+export const METODO_PAGO_TRAMITADOR: MetodoPago[] = ["efectivo", "tarjeta", "transferencia", "nequi"];
+
+/** De esas 4, todas menos efectivo piden comprobante. */
+export const METODO_PAGO_TRAMITADOR_CON_COMPROBANTE: MetodoPago[] = ["tarjeta", "transferencia", "nequi"];
 export type EstadoVenta = "pagada" | "abonada" | "anulada";
 export type DescuentoTipo = "porcentaje" | "fijo";
 

@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { pagarComisionTramitador } from "./actions";
-import { METODO_PAGO_LABEL, METODO_PAGO_SELECCIONABLE } from "@/lib/supabase/types";
+import { METODO_PAGO_LABEL, METODO_PAGO_TRAMITADOR } from "@/lib/supabase/types";
 import { buttonClass, linkClass } from "@/lib/ui";
 
 const inputClass =
@@ -64,7 +64,7 @@ export function ComisionTramitadorForm({
           className={`w-32 ${inputClass}`}
         />
         <select name="metodo_pago" defaultValue="efectivo" className={inputClass}>
-          {METODO_PAGO_SELECCIONABLE.map((value) => (
+          {METODO_PAGO_TRAMITADOR.map((value) => (
             <option key={value} value={value}>
               {METODO_PAGO_LABEL[value]}
             </option>

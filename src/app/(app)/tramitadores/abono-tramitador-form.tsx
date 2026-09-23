@@ -5,6 +5,7 @@ import { registrarAbonoTramitador } from "./actions";
 import { PagoLines } from "../ventas/pago-lines";
 import { formatCOP } from "@/lib/format";
 import { buttonClass, linkClass } from "@/lib/ui";
+import { METODO_PAGO_TRAMITADOR, METODO_PAGO_TRAMITADOR_CON_COMPROBANTE } from "@/lib/supabase/types";
 
 const inputClass =
   "rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
@@ -84,7 +85,11 @@ export function AbonoTramitadorForm({
         </p>
       ) : null}
 
-      <PagoLines total={faltaEnEfectivo} />
+      <PagoLines
+        total={faltaEnEfectivo}
+        metodos={METODO_PAGO_TRAMITADOR}
+        metodosConComprobante={METODO_PAGO_TRAMITADOR_CON_COMPROBANTE}
+      />
 
       {state.error ? <p className="text-xs text-red-600">{state.error}</p> : null}
 

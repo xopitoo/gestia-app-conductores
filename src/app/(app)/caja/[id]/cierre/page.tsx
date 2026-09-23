@@ -10,6 +10,25 @@ import { badgeClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Cierre de caja | Gestia App Conductores" };
 
+type TramoCierre = { minimo: number; mensaje: string };
+
+// Mismos cortes que el banner del dashboard (3/6/10/15/20), pero con el
+// mensaje mirando hacia el cierre del día y lo que viene mañana, no hacia
+// "seguí vendiendo ahora" — acá el día ya terminó.
+const TRAMOS_CIERRE: TramoCierre[] = [
+  { minimo: 20, mensaje: "¡Día increíble! Eres la mejor vendedora — mañana seguimos rompiéndola así." },
+  { minimo: 15, mensaje: "¡Qué día! Casi llegás a las 20 — mañana lo superamos." },
+  { minimo: 10, mensaje: "¡Excelente jornada! Mañana vamos por más." },
+  { minimo: 6, mensaje: "Buen día de ventas. Mañana seguimos con el mismo ritmo." },
+  { minimo: 3, mensaje: "Buen cierre — nada mal. Mañana seguimos sumando." },
+  { minimo: 1, mensaje: "Diste el primer paso hoy. Mañana seguimos." },
+  { minimo: 0, mensaje: "Hoy no hubo ventas, pero mañana es un nuevo día para lograrlo." },
+];
+
+function tramoCierreDe(cantidad: number): TramoCierre {
+  return TRAMOS_CIERRE.find((t) => cantidad >= t.minimo) ?? TRAMOS_CIERRE[TRAMOS_CIERRE.length - 1];
+}
+
 export default async function CierreCajaPage({
   params,
 }: {
@@ -30,7 +49,7 @@ export default async function CierreCajaPage({
   // antes de cerrar), se usa el momento actual en vez de closed_at (null).
   const cierreHasta = sesion.closed_at ?? new Date().toISOString();
 
-  const [{ data: sede }, { data: movimientos }, { data: perfiles }, { data: ventasPendientesRaw }] =
+  const [{ data: sede }, { data: movimientos }, { data: perfiles }, { data: ventasPendientesRaw }, { count: ventasHoyCount }] =
     await Promise.all([
       supabase.from("sedes").select("name").eq("id", sesion.sede_id).maybeSingle(),
       supabase
@@ -55,6 +74,17 @@ export default async function CierreCajaPage({
         .gte("created_at", sesion.opened_at)
         .lte("created_at", cierreHasta)
         .order("created_at"),
+      // Cuántas ventas se registraron durante esta sesión, sin importar su
+      // estado de pago (pagada/abonada) — para el mensaje de ánimo de
+      // cierre. Se excluyen las anuladas: una venta que se deshizo no
+      // cuenta como una venta de verdad.
+      supabase
+        .from("ventas")
+        .select("id", { count: "exact", head: true })
+        .eq("sede_id", sesion.sede_id)
+        .neq("estado", "anulada")
+        .gte("created_at", sesion.opened_at)
+        .lte("created_at", cierreHasta),
     ]);
 
   const ventaIds = [...new Set((movimientos ?? []).map((m) => m.venta_id).filter((v): v is string => !!v))];
@@ -150,6 +180,8 @@ export default async function CierreCajaPage({
   }
 
   const branding = getSedeBranding(sede?.name, organization.name);
+  const totalVentasHoy = ventasHoyCount ?? 0;
+  const tramoCierre = tramoCierreDe(totalVentasHoy);
 
   return (
     <div className="flex flex-col items-center gap-4">
@@ -432,6 +464,17 @@ export default async function CierreCajaPage({
             </table>
           </div>
         ) : null}
+
+        {/* Ventas del día + mensaje de ánimo para mañana */}
+        <div className="mt-4 border-t border-slate-200 pt-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xl font-bold text-slate-900">{totalVentasHoy}</span>
+            <span className="text-xs font-medium text-slate-500">
+              {totalVentasHoy === 1 ? "venta hoy" : "ventas hoy"}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-slate-500">{tramoCierre.mensaje}</p>
+        </div>
 
         {/* Firmas */}
         <div className="mt-8 grid grid-cols-2 gap-8 text-xs">
