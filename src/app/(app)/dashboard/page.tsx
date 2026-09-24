@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ChevronDown } from "lucide-react";
 import { getViewerContext, resolveSedeFilter, resolveSedeId } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { formatCOP } from "@/lib/format";
@@ -178,11 +179,13 @@ export default async function DashboardPage({
     return acc + (v.monto - v.descuento - pagado);
   }, 0);
 
-  // Cartera pendiente de alumnos de escuela — siempre las sedes CEAPP
-  // juntas (nunca C.R.C. Valorar, que no vende cursos), sin importar el
-  // selector de sede de arriba: el objetivo acá es justo comparar entre
-  // sedes, no filtrar a una sola.
-  const sedesEscuela = sedes.filter((s) => s.name !== "C.R.C. VALORAR");
+  // Cartera pendiente de alumnos de escuela — nunca C.R.C. Valorar, que no
+  // vende cursos. Si el admin filtró a una sede puntual, se ve solo esa
+  // (nunca mezclada con las demás); solo con "Todas las sedes" se juntan
+  // todas las de escuela para poder compararlas entre sí.
+  const sedesEscuela = sedeFilter
+    ? sedes.filter((s) => s.id === sedeFilter && s.name !== "C.R.C. VALORAR")
+    : sedes.filter((s) => s.name !== "C.R.C. VALORAR");
   const sedeEscuelaIds = sedesEscuela.map((s) => s.id);
   const { data: carteraVentas } = sedeEscuelaIds.length
     ? await supabase
@@ -230,6 +233,55 @@ export default async function DashboardPage({
     .sort((a, b) => b.monto - a.monto);
   const carteraAntiguedad = ANTIGUEDAD_BUCKETS.map((b) => ({ bucket: b, ...carteraAntiguedadMap.get(b)! }));
   const carteraTotalEscuela = carteraPorSede.reduce((acc, s) => acc + s.monto, 0);
+
+  // Reporte de tramitadores del mes: cuántas ventas trajo cada uno —
+  // incluye los que están en 0 (para saber quién no ha traído nada) y una
+  // fila "Directo" para las ventas sin tramitador. Solo tiene sentido en
+  // C.R.C. Valorar (la única sede que hoy tiene tramitadores): se muestra
+  // con "Todas las sedes" (parte de la mezcla) o con Valorar seleccionado
+  // puntualmente, pero se oculta si el admin filtró a una sede de CEAPP —
+  // ahí mostrar datos de Valorar sería mezclar sedes que no pidió ver.
+  const sedeValorar = sedes.find((s) => s.name === "C.R.C. VALORAR");
+  const mostrarTramitadoresReporte = !!sedeValorar && (!sedeFilter || sedeFilter === sedeValorar.id);
+  let tramitadoresReporteQuery = supabase
+    .from("tramitadores")
+    .select("id, nombre")
+    .eq("active", true)
+    .order("nombre");
+  if (sedeValorar) tramitadoresReporteQuery = tramitadoresReporteQuery.or(`sede_id.is.null,sede_id.eq.${sedeValorar.id}`);
+  const { data: tramitadoresReporteRows } = mostrarTramitadoresReporte
+    ? await tramitadoresReporteQuery
+    : { data: [] as { id: string; nombre: string }[] };
+
+  const { data: ventasMesTramitadorRows } = mostrarTramitadoresReporte
+    ? await supabase
+        .from("ventas")
+        .select("tramitador_id")
+        .eq("sede_id", sedeValorar!.id)
+        .neq("estado", "anulada")
+        .gte("created_at", inicioMes.toISOString())
+        .lt("created_at", finMes.toISOString())
+    : { data: [] as { tramitador_id: string | null }[] };
+
+  const conteoPorTramitador = new Map<string, number>();
+  let ventasDirectasMes = 0;
+  for (const v of ventasMesTramitadorRows ?? []) {
+    if (v.tramitador_id) {
+      conteoPorTramitador.set(v.tramitador_id, (conteoPorTramitador.get(v.tramitador_id) ?? 0) + 1);
+    } else {
+      ventasDirectasMes += 1;
+    }
+  }
+
+  const reporteTramitadores = [
+    ...(tramitadoresReporteRows ?? []).map((t) => ({ nombre: t.nombre, ventas: conteoPorTramitador.get(t.id) ?? 0 })),
+    { nombre: "Directo (sin tramitador)", ventas: ventasDirectasMes },
+  ].sort((a, b) => b.ventas - a.ventas || a.nombre.localeCompare(b.nombre));
+  const totalReporteTramitadores = reporteTramitadores.reduce((acc, r) => acc + r.ventas, 0);
+  const nombreMesReporte = `${new Intl.DateTimeFormat("es-CO", { month: "long" }).format(now).toUpperCase()} ${anioActual}`;
+  const TOP_TRAMITADORES = 7;
+  const topTramitadores = reporteTramitadores.slice(0, TOP_TRAMITADORES);
+  const restoTramitadores = reporteTramitadores.slice(TOP_TRAMITADORES);
 
   // Cursos vendidos y ranking: por producto/ítem, no por venta (una venta
   // puede tener varios cursos).
@@ -301,7 +353,7 @@ export default async function DashboardPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
         <SedeSelect sedes={sedes} currentSedeId={sedeFilter} allowAll={profile.role === "admin"} />
       </div>
@@ -364,20 +416,102 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <div className="mb-4 flex items-baseline justify-between gap-2">
-            <h2 className="text-sm font-semibold text-slate-800">Cartera de escuela — por sede</h2>
-            <span className="text-xs font-semibold text-amber-600">{formatCOP(carteraTotalEscuela)}</span>
+      {sedesEscuela.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className="mb-4 flex items-baseline justify-between gap-2">
+              <h2 className="text-sm font-semibold text-slate-800">
+                {sedeFilter ? "Cartera de escuela" : "Cartera de escuela — por sede"}
+              </h2>
+              <span className="text-xs font-semibold text-amber-600">{formatCOP(carteraTotalEscuela)}</span>
+            </div>
+            <CarteraPorSedeChart sedes={carteraPorSede} />
           </div>
-          <CarteraPorSedeChart sedes={carteraPorSede} />
-        </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="mb-4 text-sm font-semibold text-slate-800">Cartera de escuela — antigüedad</h2>
-          <CarteraAntiguedadChart buckets={carteraAntiguedad} />
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <h2 className="mb-4 text-sm font-semibold text-slate-800">Cartera de escuela — antigüedad</h2>
+            <CarteraAntiguedadChart buckets={carteraAntiguedad} />
+          </div>
         </div>
-      </div>
+      ) : null}
+
+      {mostrarTramitadoresReporte ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="mb-3 flex items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-800">Personas traídas por tramitador — {nombreMesReporte}</h2>
+            <span className="text-xs font-semibold text-slate-500">
+              Total {totalReporteTramitadores} {totalReporteTramitadores === 1 ? "venta" : "ventas"}
+            </span>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
+                <tr>
+                  <th className="px-4 py-2">Tramitador</th>
+                  <th className="px-4 py-2 text-right">Ventas</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {topTramitadores.map((r) => (
+                  <tr key={r.nombre}>
+                    <td className={`px-4 py-2 ${r.ventas === 0 ? "text-slate-400" : "font-medium text-slate-800"}`}>
+                      {r.nombre}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right ${r.ventas === 0 ? "text-slate-300" : "font-semibold text-indigo-700"}`}
+                    >
+                      {r.ventas}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {restoTramitadores.length === 0 ? (
+                <tfoot>
+                  <tr className="border-t-2 border-slate-800 bg-slate-50 font-semibold text-slate-900">
+                    <td className="px-4 py-2">Total {nombreMesReporte}</td>
+                    <td className="px-4 py-2 text-right">{totalReporteTramitadores}</td>
+                  </tr>
+                </tfoot>
+              ) : null}
+            </table>
+          </div>
+
+          {restoTramitadores.length > 0 ? (
+            <details className="group mt-2 rounded-xl border border-slate-200 [&_summary::-webkit-details-marker]:hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-xs font-medium text-slate-500">
+                <span>Ver los {restoTramitadores.length} restantes</span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="overflow-x-auto border-t border-slate-200">
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-slate-100">
+                    {restoTramitadores.map((r) => (
+                      <tr key={r.nombre}>
+                        <td
+                          className={`px-4 py-2 ${r.ventas === 0 ? "text-slate-400" : "font-medium text-slate-800"}`}
+                        >
+                          {r.nombre}
+                        </td>
+                        <td
+                          className={`px-4 py-2 text-right ${r.ventas === 0 ? "text-slate-300" : "font-semibold text-indigo-700"}`}
+                        >
+                          {r.ventas}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-800 bg-slate-50 font-semibold text-slate-900">
+                      <td className="px-4 py-2">Total {nombreMesReporte}</td>
+                      <td className="px-4 py-2 text-right">{totalReporteTramitadores}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="mb-3 text-sm font-semibold text-slate-800">Ranking de cursos más vendidos — {anioActual}</h2>

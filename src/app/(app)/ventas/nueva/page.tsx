@@ -82,7 +82,7 @@ export default async function NuevaVentaPage({
           <ArrowLeft className="h-4 w-4" />
           Ventas
         </Link>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold text-slate-900">Registrar nueva orden</h1>
           <SedeSelect sedes={sedes} currentSedeId={sedeId} />
         </div>

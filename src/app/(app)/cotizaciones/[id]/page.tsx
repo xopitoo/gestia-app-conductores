@@ -57,7 +57,7 @@ export default async function CotizacionDetailPage({
           <ArrowLeft className="h-4 w-4" />
           Cotizaciones
         </Link>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">
               {cliente?.nombre_completo ?? "Cliente"}

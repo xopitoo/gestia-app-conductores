@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight, Lock, LockOpen, ShoppingBag, UserPlus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Handshake, Lock, LockOpen, ShoppingBag, UserPlus } from "lucide-react";
 import { formatCOP, formatDate, formatTime } from "@/lib/format";
 import { VentasHoyMotivador } from "./ventas-hoy-motivador";
 
@@ -132,25 +132,22 @@ export function RecepcionistaDashboard({
                     v.debe > 0 ? "text-amber-700" : "text-slate-400"
                   }`}
                 >
-                  {v.debe > 0 ? (
-                    <>
-                      {formatCOP(v.debe)}
-                      {v.tramitadorNombre ? (
-                        <span className="block text-[11px] font-normal text-slate-400">
-                          vía {v.tramitadorNombre}
-                        </span>
-                      ) : null}
-                    </>
-                  ) : (
-                    "—"
-                  )}
+                  {v.debe > 0 ? formatCOP(v.debe) : "—"}
                 </td>
                 <td className="px-4 py-3.5">
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[11px] font-bold text-indigo-700">
                       {iniciales(v.clienteNombre) || "?"}
                     </span>
-                    <span className="font-medium text-slate-800">{v.clienteNombre}</span>
+                    <div>
+                      <span className="font-medium text-slate-800">{v.clienteNombre}</span>
+                      {v.tramitadorNombre ? (
+                        <p className="flex items-center gap-1 text-[11px] font-medium text-violet-600">
+                          <Handshake className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {v.tramitadorNombre}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-3.5">

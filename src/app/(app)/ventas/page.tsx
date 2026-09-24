@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { GraduationCap, Plus, UserPlus } from "lucide-react";
+import { GraduationCap, Handshake, Plus, UserPlus } from "lucide-react";
 import { getViewerContext, requireOpenCaja, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
@@ -47,7 +47,7 @@ export default async function VentasPage({
   let query = supabase
     .from("ventas")
     .select(
-      "id, sede_id, cliente_id, concepto, monto, descuento, estado, vendedor_id, certificado, created_at",
+      "id, sede_id, cliente_id, tramitador_id, concepto, monto, descuento, estado, vendedor_id, certificado, categorias_licencia, created_at",
     )
     .gte("created_at", desde)
     .lt("created_at", hasta)
@@ -60,17 +60,23 @@ export default async function VentasPage({
 
   const clienteIds = [...new Set((ventas ?? []).map((v) => v.cliente_id))];
   const ventaIds = (ventas ?? []).map((v) => v.id);
+  const tramitadorIds = [...new Set((ventas ?? []).map((v) => v.tramitador_id).filter((id): id is string => !!id))];
 
-  const [{ data: clientesRows }, { data: pagosRows }] = await Promise.all([
+  const [{ data: clientesRows }, { data: pagosRows }, { data: tramitadoresRows }] = await Promise.all([
     clienteIds.length
       ? supabase.from("clientes").select("id, nombre_completo, numero_documento").in("id", clienteIds)
       : Promise.resolve({ data: [] }),
     ventaIds.length
       ? supabase.from("venta_pagos").select("venta_id, metodo_pago, monto").in("venta_id", ventaIds)
       : Promise.resolve({ data: [] }),
+    tramitadorIds.length
+      ? supabase.from("tramitadores").select("id, nombre").in("id", tramitadorIds)
+      : Promise.resolve({ data: [] as { id: string; nombre: string }[] }),
   ]);
 
   const clienteName = (id: string) => clientesRows?.find((c) => c.id === id)?.nombre_completo ?? "—";
+  const tramitadorNombre = (id: string | null) =>
+    id ? ((tramitadoresRows ?? []).find((t) => t.id === id)?.nombre ?? null) : null;
   const metodosDeVenta = (id: string) =>
     [...new Set((pagosRows ?? []).filter((p) => p.venta_id === id).map((p) => p.metodo_pago))];
   const pagadoDeVenta = (id: string) =>
@@ -121,9 +127,9 @@ export default async function VentasPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-slate-900">Ventas</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <SedeSelect sedes={sedes} currentSedeId={sedeFilter} allowAll={profile.role === "admin"} />
           <Link
             href="/clientes/nuevo"
@@ -142,12 +148,14 @@ export default async function VentasPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Ingreso total" value={formatCOP(ingresoTotal)} caption="Cobrado en el período (incl. abonos)" tone="emerald" />
-        <KpiCard label="Egresos" value={formatCOP(egresos)} caption="Gastos operativos del período" tone="red" />
-        <KpiCard label="Balance neto" value={formatCOP(balanceNeto)} caption="Ingresos - egresos" tone="indigo" />
-        <KpiCard label="Órdenes" value={String(ordenes)} caption="Ventas del período (sin anuladas)" tone="slate" />
-      </div>
+      {profile.role === "admin" ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard label="Ingreso total" value={formatCOP(ingresoTotal)} caption="Cobrado en el período (incl. abonos)" tone="emerald" />
+          <KpiCard label="Egresos" value={formatCOP(egresos)} caption="Gastos operativos del período" tone="red" />
+          <KpiCard label="Balance neto" value={formatCOP(balanceNeto)} caption="Ingresos - egresos" tone="indigo" />
+          <KpiCard label="Órdenes" value={String(ordenes)} caption="Ventas del período (sin anuladas)" tone="slate" />
+        </div>
+      ) : null}
 
       <form className="flex flex-wrap items-center gap-2">
         <input type="hidden" name="sede" value={params.sede ?? ""} />
@@ -213,7 +221,15 @@ export default async function VentasPage({
                       {clienteName(v.cliente_id)}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{v.concepto}</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {v.concepto}
+                    {tramitadorNombre(v.tramitador_id) ? (
+                      <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-violet-600">
+                        <Handshake className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {tramitadorNombre(v.tramitador_id)}
+                      </p>
+                    ) : null}
+                  </td>
                   {profile.role === "admin" && !sedeFilter ? (
                     <td className="px-4 py-3 text-slate-600">{sedeName(v.sede_id)}</td>
                   ) : null}
@@ -225,7 +241,19 @@ export default async function VentasPage({
                       <span className={badgeClass(estado.tone)}>
                         {estado.label}
                       </span>
-                      {v.certificado ? (
+                      {sedeName(v.sede_id) === "C.R.C. VALORAR" ? (
+                        // En Valorar casi toda venta termina certificada, así
+                        // que el badge de "Sin RUNT" no aportaba nada y encima
+                        // se confundía con si el CLIENTE está inscrito en RUNT
+                        // (eso es otro campo, ver clientes.runt) — acá se
+                        // aprovecha ese espacio para mostrar la categoría de
+                        // licencia que certificó esta venta.
+                        (v.categorias_licencia ?? []).map((cat) => (
+                          <span key={cat} className={badgeClass("info")}>
+                            {cat}
+                          </span>
+                        ))
+                      ) : v.certificado ? (
                         <span
                           title="Certificado RUNT subido"
                           className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700"
