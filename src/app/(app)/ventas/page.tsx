@@ -4,12 +4,15 @@ import { GraduationCap, Plus, UserPlus } from "lucide-react";
 import { getViewerContext, requireOpenCaja, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { Pagination } from "@/components/pagination";
 import { formatCOP, formatDateTime } from "@/lib/format";
 import { anularVenta } from "./actions";
 import { METODO_PAGO_LABEL, type EstadoVenta } from "@/lib/supabase/types";
 import { badgeClass, buttonClass, ESTADO_VENTA_LABEL, linkClass } from "@/lib/ui";
 
 export const metadata: Metadata = { title: "Ventas | Gestia App Conductores" };
+
+const PAGE_SIZE = 15;
 
 function monthRange() {
   const now = new Date();
@@ -28,6 +31,7 @@ export default async function VentasPage({
     estado?: string;
     desde?: string;
     hasta?: string;
+    page?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -84,6 +88,14 @@ export default async function VentasPage({
   const sedeName = (id: string) => sedes.find((s) => s.id === id)?.name ?? "—";
 
   const ordenes = filtered.filter((v) => v.estado !== "anulada").length;
+
+  // Paginado en memoria (15 por página) — el filtrado por cliente/método ya
+  // pasa por JS más abajo (necesita clientesRows/pagosRows), así que acá
+  // solo se recorta la página a mostrar; los KPIs de arriba siguen usando
+  // el total del período completo, no el de esta página.
+  const page = Math.max(1, Number(params.page) || 1);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginaVentas = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const pagosPeriodoQuery = supabase
     .from("venta_pagos")
@@ -189,7 +201,7 @@ export default async function VentasPage({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filtered.map((v) => {
+            {paginaVentas.map((v) => {
               const estado = ESTADO_VENTA_LABEL[v.estado] ?? ESTADO_VENTA_LABEL.pagada;
               const metodos = metodosDeVenta(v.id);
               const pagado = pagadoDeVenta(v.id);
@@ -268,6 +280,20 @@ export default async function VentasPage({
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        basePath="/ventas"
+        searchParams={{
+          sede: params.sede,
+          q: params.q,
+          metodo: params.metodo,
+          estado: params.estado,
+          desde,
+          hasta,
+        }}
+      />
     </div>
   );
 }
