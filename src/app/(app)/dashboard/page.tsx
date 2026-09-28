@@ -39,7 +39,7 @@ export default async function DashboardPage({
 
     let ventasHoyQuery = supabase
       .from("ventas")
-      .select("id, cliente_id, tramitador_id, monto, descuento, created_at")
+      .select("id, cliente_id, tramitador_id, monto, descuento, incremento, created_at")
       .gte("created_at", hoy.toISOString())
       .lt("created_at", manana.toISOString())
       .neq("estado", "anulada")
@@ -99,7 +99,7 @@ export default async function DashboardPage({
           : null,
         metodos,
         abonado,
-        debe: v.monto - v.descuento - abonado,
+        debe: v.monto - v.descuento + v.incremento - abonado,
       };
     });
 
@@ -165,7 +165,7 @@ export default async function DashboardPage({
 
   // Saldo pendiente: ventas abonadas (no acotado a los últimos dos años a
   // propósito — es un saldo corriente, no algo del período).
-  let abonadasQuery = supabase.from("ventas").select("id, monto, descuento").eq("estado", "abonada");
+  let abonadasQuery = supabase.from("ventas").select("id, monto, descuento, incremento").eq("estado", "abonada");
   if (sedeFilter) abonadasQuery = abonadasQuery.eq("sede_id", sedeFilter);
   const { data: abonadas } = await abonadasQuery;
   const abonadaIds = (abonadas ?? []).map((v) => v.id);
@@ -176,7 +176,7 @@ export default async function DashboardPage({
     const pagado = (pagosDeAbonadas ?? [])
       .filter((p) => p.venta_id === v.id)
       .reduce((a, p) => a + p.monto, 0);
-    return acc + (v.monto - v.descuento - pagado);
+    return acc + (v.monto - v.descuento + v.incremento - pagado);
   }, 0);
 
   // Cartera pendiente de alumnos de escuela — nunca C.R.C. Valorar, que no
@@ -190,10 +190,20 @@ export default async function DashboardPage({
   const { data: carteraVentas } = sedeEscuelaIds.length
     ? await supabase
         .from("ventas")
-        .select("id, sede_id, cliente_id, monto, descuento, created_at")
+        .select("id, sede_id, cliente_id, monto, descuento, incremento, created_at")
         .eq("estado", "abonada")
         .in("sede_id", sedeEscuelaIds)
-    : { data: [] as { id: string; sede_id: string; cliente_id: string; monto: number; descuento: number; created_at: string }[] };
+    : {
+        data: [] as {
+          id: string;
+          sede_id: string;
+          cliente_id: string;
+          monto: number;
+          descuento: number;
+          incremento: number;
+          created_at: string;
+        }[],
+      };
 
   const carteraVentaIds = (carteraVentas ?? []).map((v) => v.id);
   const { data: carteraPagos } = carteraVentaIds.length
@@ -209,7 +219,7 @@ export default async function DashboardPage({
   );
 
   for (const v of carteraVentas ?? []) {
-    const saldo = v.monto - v.descuento - pagadoDeCarteraVenta(v.id);
+    const saldo = v.monto - v.descuento + v.incremento - pagadoDeCarteraVenta(v.id);
     if (saldo <= 0) continue;
 
     const porSede = carteraPorSedeMap.get(v.sede_id) ?? { monto: 0, clientes: new Set<string>() };

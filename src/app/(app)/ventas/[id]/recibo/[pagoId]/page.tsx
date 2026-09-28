@@ -17,7 +17,7 @@ export default async function ReciboPage({
 
   const { data: venta } = await supabase
     .from("ventas")
-    .select("id, sede_id, cliente_id, concepto, monto, descuento")
+    .select("id, sede_id, cliente_id, concepto, monto, descuento, incremento")
     .eq("id", id)
     .maybeSingle();
 
@@ -48,7 +48,7 @@ export default async function ReciboPage({
   const pagadoHastaEste = (todosLosPagos ?? [])
     .filter((p) => p.created_at <= pago.created_at)
     .reduce((acc, p) => acc + p.monto, 0);
-  const totalNeto = venta.monto - venta.descuento;
+  const totalNeto = venta.monto - venta.descuento + venta.incremento;
   const saldoPendiente = totalNeto - pagadoHastaEste;
 
   return (
@@ -116,16 +116,22 @@ export default async function ReciboPage({
             <span>{formatCOP(venta.monto)}</span>
           </div>
           {venta.descuento > 0 ? (
-            <>
-              <div className="flex items-center justify-between text-emerald-600">
-                <span>Descuento</span>
-                <span>−{formatCOP(venta.descuento)}</span>
-              </div>
-              <div className="flex items-center justify-between text-slate-700">
-                <span>Total con descuento</span>
-                <span>{formatCOP(totalNeto)}</span>
-              </div>
-            </>
+            <div className="flex items-center justify-between text-emerald-600">
+              <span>Descuento</span>
+              <span>−{formatCOP(venta.descuento)}</span>
+            </div>
+          ) : null}
+          {venta.incremento > 0 ? (
+            <div className="flex items-center justify-between text-amber-600">
+              <span>Incremento</span>
+              <span>+{formatCOP(venta.incremento)}</span>
+            </div>
+          ) : null}
+          {venta.descuento > 0 || venta.incremento > 0 ? (
+            <div className="flex items-center justify-between text-slate-700">
+              <span>Total</span>
+              <span>{formatCOP(totalNeto)}</span>
+            </div>
           ) : null}
           <div className="flex items-center justify-between text-base font-bold text-slate-900">
             <span>Pagó ahora ({METODO_PAGO_LABEL[pago.metodo_pago] ?? pago.metodo_pago})</span>

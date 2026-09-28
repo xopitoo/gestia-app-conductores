@@ -37,7 +37,7 @@ export default async function EstadoCuentaPage({
     supabase.from("sedes").select("name").eq("id", cliente.sede_id).maybeSingle(),
     supabase
       .from("ventas")
-      .select("id, concepto, monto, descuento, estado, created_at")
+      .select("id, concepto, monto, descuento, incremento, estado, created_at")
       .eq("cliente_id", id)
       .neq("estado", "anulada")
       .order("created_at"),
@@ -52,11 +52,11 @@ export default async function EstadoCuentaPage({
 
   const filas = (ventas ?? []).map((v) => {
     const pagado = pagadoDe(v.id);
-    const saldo = v.monto - v.descuento - pagado;
+    const saldo = v.monto - v.descuento + v.incremento - pagado;
     return { ...v, pagado, saldo };
   });
 
-  const totalOrdenes = filas.reduce((acc, f) => acc + (f.monto - f.descuento), 0);
+  const totalOrdenes = filas.reduce((acc, f) => acc + (f.monto - f.descuento + f.incremento), 0);
   const totalPagado = filas.reduce((acc, f) => acc + f.pagado, 0);
   const totalPendiente = filas.reduce((acc, f) => acc + f.saldo, 0);
 
@@ -153,7 +153,9 @@ export default async function EstadoCuentaPage({
                       <td className="py-1.5 pr-2">
                         <span className={badgeClass(estado.tone)}>{estado.label}</span>
                       </td>
-                      <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(f.monto - f.descuento)}</td>
+                      <td className="py-1.5 pr-2 text-right text-slate-600">
+                        {formatCOP(f.monto - f.descuento + f.incremento)}
+                      </td>
                       <td className="py-1.5 pr-2 text-right text-emerald-600">{formatCOP(f.pagado)}</td>
                       <td className={`py-1.5 pl-2 text-right font-medium ${f.saldo > 0 ? "text-amber-700" : "text-slate-400"}`}>
                         {formatCOP(f.saldo)}

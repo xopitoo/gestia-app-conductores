@@ -48,7 +48,7 @@ export default async function TramitadoresPage({
   const { data: ventasRows } = tramitadorIds.length
     ? await supabase
         .from("ventas")
-        .select("id, tramitador_id, sede_id, estado, monto, descuento")
+        .select("id, tramitador_id, sede_id, estado, monto, descuento, incremento")
         .in("tramitador_id", tramitadorIds)
         .neq("estado", "anulada")
     : {
@@ -59,6 +59,7 @@ export default async function TramitadoresPage({
           estado: string;
           monto: number;
           descuento: number;
+          incremento: number;
         }[],
       };
 
@@ -101,7 +102,7 @@ export default async function TramitadoresPage({
   const pendienteVentasPorSede = new Map<string, number>();
   for (const v of ventasRows ?? []) {
     if (v.estado !== "abonada" || !v.tramitador_id) continue;
-    const pendiente = v.monto - v.descuento - pagadoDeVenta(v.id);
+    const pendiente = v.monto - v.descuento + v.incremento - pagadoDeVenta(v.id);
     const key = `${v.tramitador_id}|${v.sede_id}`;
     pendienteVentasPorSede.set(key, (pendienteVentasPorSede.get(key) ?? 0) + pendiente);
   }

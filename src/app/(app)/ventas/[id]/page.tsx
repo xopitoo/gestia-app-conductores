@@ -28,7 +28,7 @@ export default async function VentaDetailPage({
   const { data: venta } = await supabase
     .from("ventas")
     .select(
-      "id, sede_id, cliente_id, concepto, monto, descuento, estado, referido_nombre, tramitador_id, precio_tramitador, certificado, certificado_at, certificado_path, created_at",
+      "id, sede_id, cliente_id, concepto, monto, descuento, incremento, estado, referido_nombre, tramitador_id, precio_tramitador, certificado, certificado_at, certificado_path, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -94,7 +94,7 @@ export default async function VentaDetailPage({
   );
 
   const pagado = (pagos ?? []).reduce((acc, p) => acc + p.monto, 0);
-  const totalNeto = venta.monto - venta.descuento;
+  const totalNeto = venta.monto - venta.descuento + venta.incremento;
   const saldo = totalNeto - pagado;
   const estado = ESTADO_VENTA_LABEL[venta.estado] ?? ESTADO_VENTA_LABEL.pagada;
 
@@ -184,21 +184,31 @@ export default async function VentaDetailPage({
             ))}
           </ul>
           <div className="mt-3 flex flex-col gap-0.5 border-t border-slate-200 pt-3 text-sm">
-            <div className={`flex items-center justify-between ${venta.descuento > 0 ? "text-slate-500" : "font-semibold text-slate-900"}`}>
-              <span>{venta.descuento > 0 ? "Subtotal" : "Total"}</span>
+            <div
+              className={`flex items-center justify-between ${
+                venta.descuento > 0 || venta.incremento > 0 ? "text-slate-500" : "font-semibold text-slate-900"
+              }`}
+            >
+              <span>{venta.descuento > 0 || venta.incremento > 0 ? "Subtotal" : "Total"}</span>
               <span>{formatCOP(venta.monto)}</span>
             </div>
             {venta.descuento > 0 ? (
-              <>
-                <div className="flex items-center justify-between text-emerald-600">
-                  <span>Descuento</span>
-                  <span>−{formatCOP(venta.descuento)}</span>
-                </div>
-                <div className="flex items-center justify-between font-semibold text-slate-900">
-                  <span>Total con descuento</span>
-                  <span>{formatCOP(totalNeto)}</span>
-                </div>
-              </>
+              <div className="flex items-center justify-between text-emerald-600">
+                <span>Descuento</span>
+                <span>−{formatCOP(venta.descuento)}</span>
+              </div>
+            ) : null}
+            {venta.incremento > 0 ? (
+              <div className="flex items-center justify-between text-amber-600">
+                <span>Incremento</span>
+                <span>+{formatCOP(venta.incremento)}</span>
+              </div>
+            ) : null}
+            {venta.descuento > 0 || venta.incremento > 0 ? (
+              <div className="flex items-center justify-between font-semibold text-slate-900">
+                <span>Total</span>
+                <span>{formatCOP(totalNeto)}</span>
+              </div>
             ) : null}
             <div className="flex items-center justify-between text-emerald-600">
               <span>Pagado</span>

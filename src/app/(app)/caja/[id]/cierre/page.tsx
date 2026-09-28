@@ -68,7 +68,7 @@ export default async function CierreCajaPage({
       // esta caja.
       supabase
         .from("ventas")
-        .select("id, cliente_id, referido_nombre, tramitador_id, monto, descuento, created_at")
+        .select("id, cliente_id, referido_nombre, tramitador_id, monto, descuento, incremento, created_at")
         .eq("sede_id", sesion.sede_id)
         .eq("estado", "abonada")
         .gte("created_at", sesion.opened_at)
@@ -387,7 +387,7 @@ export default async function CierreCajaPage({
               <tbody>
                 {ventasPendientes.map((v) => {
                   const pagado = pagadoDePendiente(v.id);
-                  const pendiente = v.monto - v.descuento - pagado;
+                  const pendiente = v.monto - v.descuento + v.incremento - pagado;
                   return (
                     <tr key={v.id} className="border-b border-slate-100">
                       <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">
@@ -397,7 +397,9 @@ export default async function CierreCajaPage({
                         {clienteDe(v.cliente_id)}
                       </td>
                       <td className="py-1.5 pr-2 text-slate-500">{referidoDe(v)}</td>
-                      <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(v.monto - v.descuento)}</td>
+                      <td className="py-1.5 pr-2 text-right text-slate-600">
+                        {formatCOP(v.monto - v.descuento + v.incremento)}
+                      </td>
                       <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(pagado)}</td>
                       <td className="py-1.5 pl-2 text-right font-semibold text-amber-700">
                         {formatCOP(pendiente)}
@@ -413,7 +415,10 @@ export default async function CierreCajaPage({
                   </td>
                   <td className="py-1.5 pl-2 text-right text-amber-700">
                     {formatCOP(
-                      ventasPendientes.reduce((acc, v) => acc + (v.monto - v.descuento - pagadoDePendiente(v.id)), 0),
+                      ventasPendientes.reduce(
+                        (acc, v) => acc + (v.monto - v.descuento + v.incremento - pagadoDePendiente(v.id)),
+                        0,
+                      ),
                     )}
                   </td>
                 </tr>

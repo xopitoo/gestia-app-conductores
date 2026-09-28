@@ -15,11 +15,14 @@ import { buttonClass, linkClass } from "@/lib/ui";
 export function DescuentoForm({
   ventaId,
   montoBruto,
+  incremento,
   pagado,
   descuentoActual,
 }: {
   ventaId: string;
   montoBruto: number;
+  /** Incremento (Brilla/Addi/Sistecrédito) ya fijado al crear la venta — no editable acá, solo se suma para calcular el saldo real. */
+  incremento: number;
   pagado: number;
   descuentoActual: number;
 }) {
@@ -54,9 +57,9 @@ export function DescuentoForm({
       : tipo === "fijo"
         ? Math.min(valor, montoBruto)
         : 0;
-  const maxDescuento = montoBruto - pagado;
+  const maxDescuento = montoBruto + incremento - pagado;
   const excede = descuentoMonto > maxDescuento;
-  const nuevoSaldo = montoBruto - descuentoMonto - pagado;
+  const nuevoSaldo = montoBruto - descuentoMonto + incremento - pagado;
 
   return (
     <form action={formAction} className="flex w-72 flex-col gap-2 rounded-lg border border-slate-200 p-3">

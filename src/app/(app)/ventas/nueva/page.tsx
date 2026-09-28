@@ -108,6 +108,7 @@ export default async function NuevaVentaPage({
         <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
           <VentaForm
             sedeId={sedeId}
+            esCeapp={sedes.find((s) => s.id === sedeId)?.name !== "C.R.C. VALORAR"}
             clientes={clientes ?? []}
             productos={productosSede}
             tramitadores={tramitadores ?? []}

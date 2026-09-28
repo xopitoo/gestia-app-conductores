@@ -274,10 +274,17 @@ create table if not exists public.ventas (
   referido_nombre text,
   -- Descuento en pesos ya aplicado sobre `monto` (bruto, suma de
   -- venta_items). Lo que realmente hay que cobrar/queda pendiente siempre
-  -- es `monto - descuento`. Se puede fijar al crear la venta (recepcionista
-  -- o admin) o después, desde /admin/mora (solo admin) — ver
-  -- registrar_venta / aplicar_descuento_venta.
+  -- es `monto - descuento + incremento` (ver esa columna más abajo). Se
+  -- puede fijar al crear la venta (recepcionista o admin) o después, desde
+  -- /admin/mora (solo admin) — ver registrar_venta / aplicar_descuento_venta.
   descuento numeric(12, 2) not null default 0 check (descuento >= 0),
+  -- Incremento en pesos ya aplicado sobre `monto` (ej. el % que cobran de
+  -- más Brilla/Addi/Sistecrédito por financiar la compra) — lo opuesto al
+  -- descuento. Lo que realmente hay que cobrar/queda pendiente siempre es
+  -- `monto - descuento + incremento`. Solo se fija al crear la venta (no
+  -- es editable después, a diferencia del descuento) — ver registrar_venta.
+  -- Solo tiene sentido en las sedes CEAPP (Valorar no lo usa).
+  incremento numeric(12, 2) not null default 0 check (incremento >= 0),
   -- Certificado RUNT: para una auditoría, toda venta ya paga por completo
   -- debe tener el certificado subido — lo sube el recepcionista (de su
   -- propia sede) o un admin, nunca antes de que el saldo llegue a cero. Es
@@ -301,6 +308,9 @@ alter table public.ventas add column if not exists referido_nombre text;
 alter table public.ventas add column if not exists descuento numeric(12, 2) not null default 0;
 alter table public.ventas drop constraint if exists ventas_descuento_chk;
 alter table public.ventas add constraint ventas_descuento_chk check (descuento >= 0);
+alter table public.ventas add column if not exists incremento numeric(12, 2) not null default 0;
+alter table public.ventas drop constraint if exists ventas_incremento_chk;
+alter table public.ventas add constraint ventas_incremento_chk check (incremento >= 0);
 alter table public.ventas add column if not exists certificado boolean not null default false;
 alter table public.ventas add column if not exists certificado_at timestamptz;
 alter table public.ventas add column if not exists certificado_by uuid references public.profiles (id);
@@ -859,6 +869,7 @@ drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, t
 drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text);
 drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric);
 drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric, text[]);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric, text[], text, numeric);
 
 create or replace function public.registrar_venta(
   p_sede_id uuid,
@@ -872,7 +883,9 @@ create or replace function public.registrar_venta(
   p_descuento_valor numeric default 0,
   p_tramitador_id uuid default null,
   p_precio_tramitador numeric default 0,
-  p_categorias_licencia text[] default null
+  p_categorias_licencia text[] default null,
+  p_incremento_tipo text default null,
+  p_incremento_valor numeric default 0
 )
 returns public.ventas
 language plpgsql
@@ -885,6 +898,7 @@ declare
   v_org_id uuid;
   v_monto_total numeric(12, 2);
   v_descuento numeric(12, 2);
+  v_incremento numeric(12, 2);
   v_monto_neto numeric(12, 2);
   v_monto_pagado numeric(12, 2);
   v_concepto text;
@@ -935,6 +949,27 @@ begin
   end if;
   v_monto_neto := v_monto_total - v_descuento;
 
+  -- Incremento (Brilla/Addi/Sistecrédito, etc.) — se calcula sobre el total
+  -- YA con descuento aplicado (lo que de verdad se está financiando), y se
+  -- le suma encima. A diferencia del descuento, no es editable después de
+  -- creada la venta.
+  if p_incremento_tipo is null or p_incremento_tipo = '' then
+    v_incremento := 0;
+  elsif p_incremento_tipo = 'porcentaje' then
+    if p_incremento_valor < 0 or p_incremento_valor > 100 then
+      raise exception 'El porcentaje de incremento debe estar entre 0 y 100';
+    end if;
+    v_incremento := round(v_monto_neto * p_incremento_valor / 100, 2);
+  elsif p_incremento_tipo = 'fijo' then
+    if p_incremento_valor < 0 then
+      raise exception 'El incremento no puede ser negativo';
+    end if;
+    v_incremento := p_incremento_valor;
+  else
+    raise exception 'Tipo de incremento inválido';
+  end if;
+  v_monto_neto := v_monto_neto + v_incremento;
+
   if v_monto_pagado > v_monto_neto then
     raise exception 'El pago no puede superar el total de la orden';
   end if;
@@ -956,13 +991,13 @@ begin
 
   insert into public.ventas (
     organization_id, sede_id, cliente_id, concepto, monto, estado, vendedor_id, referido_nombre,
-    descuento, tramitador_id, precio_tramitador, categorias_licencia, created_by
+    descuento, incremento, tramitador_id, precio_tramitador, categorias_licencia, created_by
   )
   values (
     v_org_id, p_sede_id, p_cliente_id, v_concepto, v_monto_total,
     case when v_monto_pagado >= v_monto_neto then 'pagada' else 'abonada' end,
     p_vendedor_id, nullif(trim(p_referido_nombre), ''),
-    v_descuento, p_tramitador_id, p_precio_tramitador, p_categorias_licencia, auth.uid()
+    v_descuento, v_incremento, p_tramitador_id, p_precio_tramitador, p_categorias_licencia, auth.uid()
   )
   returning * into v_venta;
 
@@ -1062,7 +1097,7 @@ begin
   select sum((pago ->> 'monto')::numeric) into v_monto_nuevo
     from jsonb_array_elements(p_pagos) as pago;
 
-  if v_pagado_previo + v_monto_nuevo > (v_venta.monto - v_venta.descuento) then
+  if v_pagado_previo + v_monto_nuevo > (v_venta.monto - v_venta.descuento + v_venta.incremento) then
     raise exception 'El pago supera el saldo pendiente';
   end if;
 
@@ -1085,7 +1120,7 @@ begin
   end loop;
 
   update public.ventas
-  set estado = case when v_pagado_previo + v_monto_nuevo >= (monto - descuento) then 'pagada' else 'abonada' end
+  set estado = case when v_pagado_previo + v_monto_nuevo >= (monto - descuento + incremento) then 'pagada' else 'abonada' end
   where id = p_venta_id
   returning * into v_venta;
 
@@ -1155,7 +1190,7 @@ begin
     raise exception 'La venta ya está paga por completo';
   end if;
 
-  select (v_venta.monto - v_venta.descuento) - coalesce(sum(monto), 0) into v_saldo_pendiente
+  select (v_venta.monto - v_venta.descuento + v_venta.incremento) - coalesce(sum(monto), 0) into v_saldo_pendiente
     from public.venta_pagos where venta_id = v_venta.id;
   if p_monto > v_saldo_pendiente then
     raise exception 'El monto supera el saldo pendiente de la venta';
@@ -1186,7 +1221,7 @@ begin
 
   update public.ventas
   set estado = case
-    when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento)
+    when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento + v_venta.incremento)
     then 'pagada' else 'abonada'
   end
   where id = v_venta.id
@@ -1266,7 +1301,7 @@ begin
   loop
     exit when v_saldo_tramitador <= 0;
 
-    select (v_venta.monto - v_venta.descuento) - coalesce(sum(monto), 0) into v_pendiente_venta
+    select (v_venta.monto - v_venta.descuento + v_venta.incremento) - coalesce(sum(monto), 0) into v_pendiente_venta
       from public.venta_pagos where venta_id = v_venta.id;
     if v_pendiente_venta <= 0 then
       continue;
@@ -1288,7 +1323,7 @@ begin
 
     update public.ventas
     set estado = case
-      when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento)
+      when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento + v_venta.incremento)
       then 'pagada' else 'abonada'
     end
     where id = v_venta.id;
@@ -1367,7 +1402,7 @@ begin
     if v_venta_id is not null then
       update public.ventas
       set estado = case
-        when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta_id) >= (monto - descuento)
+        when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta_id) >= (monto - descuento + incremento)
         then 'pagada' else 'abonada'
       end
       where id = v_venta_id and estado <> 'anulada';
@@ -1500,7 +1535,7 @@ begin
       loop
         exit when v_restante <= 0;
 
-        select (v_venta.monto - v_venta.descuento) - coalesce(sum(monto), 0) into v_pendiente_venta
+        select (v_venta.monto - v_venta.descuento + v_venta.incremento) - coalesce(sum(monto), 0) into v_pendiente_venta
           from public.venta_pagos where venta_id = v_venta.id;
         if v_pendiente_venta <= 0 then
           continue;
@@ -1527,7 +1562,7 @@ begin
 
         update public.ventas
         set estado = case
-          when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento)
+          when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento + v_venta.incremento)
           then 'pagada' else 'abonada'
         end
         where id = v_venta.id;
@@ -1721,7 +1756,7 @@ begin
     from (
       select
         coalesce(pagos.pagado, 0) as pagado,
-        (v.monto - v.descuento) - greatest(
+        (v.monto - v.descuento + v.incremento) - greatest(
           0,
           (
             referidos.monto_referido
@@ -1812,7 +1847,7 @@ begin
       coalesce(c.nombre_completo, 'Cliente') as descripcion,
       (
         coalesce(pagos.pagado, 0) - (
-          (v.monto - v.descuento) - greatest(
+          (v.monto - v.descuento + v.incremento) - greatest(
             0,
             (
               referidos.monto_referido
@@ -1822,7 +1857,7 @@ begin
         )
       ) as monto,
       coalesce(pagos.pagado, 0) as pagado,
-      (v.monto - v.descuento) as total
+      (v.monto - v.descuento + v.incremento) as total
     from public.ventas v
     left join public.clientes c on c.id = v.cliente_id
     left join lateral (
@@ -1904,7 +1939,7 @@ begin
   if v_venta.tramitador_id is null then
     raise exception 'Esta venta no tiene un tramitador asociado';
   end if;
-  if p_precio_tramitador > (v_venta.monto - v_venta.descuento) then
+  if p_precio_tramitador > (v_venta.monto - v_venta.descuento + v_venta.incremento) then
     raise exception 'El precio del tramitador no puede superar el total de la orden';
   end if;
 
@@ -2050,13 +2085,13 @@ begin
   end if;
 
   select coalesce(sum(monto), 0) into v_pagado from public.venta_pagos where venta_id = p_venta_id;
-  if v_pagado > (v_venta.monto - v_descuento) then
+  if v_pagado > (v_venta.monto - v_descuento + v_venta.incremento) then
     raise exception 'El descuento no puede dejar el total por debajo de lo ya pagado';
   end if;
 
   update public.ventas
   set descuento = v_descuento,
-      estado = case when v_pagado >= (v_venta.monto - v_descuento) then 'pagada' else 'abonada' end
+      estado = case when v_pagado >= (v_venta.monto - v_descuento + v_venta.incremento) then 'pagada' else 'abonada' end
   where id = p_venta_id
   returning * into v_venta;
 
@@ -2124,7 +2159,7 @@ begin
   end if;
 
   select coalesce(sum(monto), 0) into v_pagado from public.venta_pagos where venta_id = p_venta_id;
-  if v_pagado < (v_venta.monto - v_venta.descuento) then
+  if v_pagado < (v_venta.monto - v_venta.descuento + v_venta.incremento) then
     raise exception 'No se puede subir el certificado: todavía queda saldo pendiente por cobrar';
   end if;
 
@@ -2435,6 +2470,12 @@ begin
     or new.certificado_path is distinct from old.certificado_path
   ) and coalesce(current_setting('app.allow_certificado_update', true), '') <> 'true' then
     raise exception 'No autorizado para modificar la certificación de esta venta';
+  end if;
+
+  -- incremento nunca se edita después de creada la venta (a diferencia del
+  -- descuento) — ni admin ni recepcionista, solo lo fija registrar_venta.
+  if new.incremento is distinct from old.incremento then
+    raise exception 'El incremento no se puede modificar después de creada la venta';
   end if;
 
   return new;

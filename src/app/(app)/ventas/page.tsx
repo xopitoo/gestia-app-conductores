@@ -47,7 +47,7 @@ export default async function VentasPage({
   let query = supabase
     .from("ventas")
     .select(
-      "id, sede_id, cliente_id, tramitador_id, concepto, monto, descuento, estado, vendedor_id, certificado, categorias_licencia, created_at",
+      "id, sede_id, cliente_id, tramitador_id, concepto, monto, descuento, incremento, estado, vendedor_id, certificado, categorias_licencia, created_at",
     )
     .gte("created_at", desde)
     .lt("created_at", hasta)
@@ -273,10 +273,17 @@ export default async function VentasPage({
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-slate-800">
-                    {v.estado === "abonada" ? `${formatCOP(pagado)} / ${formatCOP(v.monto - v.descuento)}` : formatCOP(v.monto - v.descuento)}
+                    {v.estado === "abonada"
+                      ? `${formatCOP(pagado)} / ${formatCOP(v.monto - v.descuento + v.incremento)}`
+                      : formatCOP(v.monto - v.descuento + v.incremento)}
                     {v.descuento > 0 ? (
                       <div className="text-[11px] font-normal text-emerald-600">
                         Desc. {formatCOP(v.descuento)}
+                      </div>
+                    ) : null}
+                    {v.incremento > 0 ? (
+                      <div className="text-[11px] font-normal text-amber-600">
+                        Incr. {formatCOP(v.incremento)}
                       </div>
                     ) : null}
                   </td>

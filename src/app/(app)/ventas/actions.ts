@@ -27,6 +27,8 @@ export async function registrarVenta(
   const descuentoValor = Number(formData.get("descuento_valor") ?? 0) || 0;
   const tramitadorId = String(formData.get("tramitador_id") ?? "") || null;
   const precioTramitador = Number(formData.get("precio_tramitador") ?? 0) || 0;
+  const incrementoTipo = (String(formData.get("incremento_tipo") ?? "") || null) as DescuentoTipo | null;
+  const incrementoValor = Number(formData.get("incremento_valor") ?? 0) || 0;
   const categoriasLicenciaRaw = String(formData.get("categorias_licencia") ?? "[]");
   const categoriasLicencia: string[] = (() => {
     try {
@@ -64,6 +66,8 @@ export async function registrarVenta(
     p_tramitador_id: tramitadorId,
     p_precio_tramitador: precioTramitador,
     p_categorias_licencia: categoriasLicencia.length > 0 ? categoriasLicencia : null,
+    p_incremento_tipo: incrementoTipo,
+    p_incremento_valor: incrementoValor,
   });
 
   if (error) {
@@ -74,6 +78,9 @@ export async function registrarVenta(
       return { error: "PIN de autorización incorrecto." };
     }
     if (error.message.includes("descuento")) {
+      return { error: error.message };
+    }
+    if (error.message.includes("incremento")) {
       return { error: error.message };
     }
     if (error.message.includes("precio del tramitador")) {

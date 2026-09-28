@@ -192,11 +192,13 @@ export type VentaRow = {
   vendedor_id: string;
   /** Persona externa (no es un usuario del sistema) que refirió al cliente. */
   referido_nombre: string | null;
-  /** Descuento en pesos sobre `monto` (bruto). Lo que hay que cobrar es `monto - descuento`. */
+  /** Descuento en pesos sobre `monto` (bruto). Lo que hay que cobrar es `monto - descuento + incremento`. */
   descuento: number;
+  /** Incremento en pesos sobre `monto` (ej. % de Brilla/Addi/Sistecrédito) — lo opuesto al descuento. Solo se fija al crear la venta, nunca editable después. */
+  incremento: number;
   /** Tramitador formal (tabla tramitadores) que trajo a este cliente. */
   tramitador_id: string | null;
-  /** Cuánto de esta venta le corresponde a la organización — no lo que gana el tramitador (esa es `monto - descuento - precio_tramitador`). */
+  /** Cuánto de esta venta le corresponde a la organización — no lo que gana el tramitador (esa es `monto - descuento + incremento - precio_tramitador`). */
   precio_tramitador: number;
   /** Certificado RUNT subido — solo true si ya está paga por completo. */
   certificado: boolean;
@@ -362,6 +364,8 @@ export type Database = {
           p_tramitador_id?: string | null;
           p_precio_tramitador?: number;
           p_categorias_licencia?: string[] | null;
+          p_incremento_tipo?: DescuentoTipo | null;
+          p_incremento_valor?: number;
         },
         VentaRow
       >;

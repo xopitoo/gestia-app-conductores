@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, HandCoins, Plus, X } from "lu
 import { registrarVenta } from "./actions";
 import { PagoLines } from "./pago-lines";
 import { DescuentoPicker } from "@/components/descuento-picker";
+import { IncrementoPicker } from "@/components/incremento-picker";
 import { RuntConsultaLink } from "@/components/runt-link";
 import { RuntBadge } from "@/app/(app)/clientes/runt-badge";
 import type {
@@ -162,6 +163,7 @@ function detectarCategoriasDeItems(itemsActuales: VentaItemInput[]): string[] {
 
 export function VentaForm({
   sedeId,
+  esCeapp,
   clientes,
   productos,
   tramitadores,
@@ -169,6 +171,8 @@ export function VentaForm({
   clienteIdInicial,
 }: {
   sedeId: string;
+  /** El incremento por Brilla/Addi/Sistecrédito solo aplica en las sedes CEAPP, nunca en C.R.C. Valorar. */
+  esCeapp: boolean;
   clientes: ClienteRow[];
   productos: ProductoRow[];
   tramitadores: TramitadorRow[];
@@ -184,6 +188,8 @@ export function VentaForm({
   const [listaProductosAbierta, setListaProductosAbierta] = useState<"normal" | "tramitador">("normal");
   const [descuentoTipo, setDescuentoTipo] = useState<DescuentoTipo | "">("");
   const [descuentoValor, setDescuentoValor] = useState(0);
+  const [incrementoTipo, setIncrementoTipo] = useState<DescuentoTipo | "">("");
+  const [incrementoValor, setIncrementoValor] = useState(0);
   const [tramitadorId, setTramitadorId] = useState("");
   const [precioTramitador, setPrecioTramitador] = useState(0);
   const [categoriasLicencia, setCategoriasLicencia] = useState<string[]>([]);
@@ -294,7 +300,18 @@ export function VentaForm({
       : descuentoTipo === "fijo"
         ? Math.min(descuentoValor, total)
         : 0;
-  const totalNeto = total - descuentoMonto;
+  const totalConDescuento = total - descuentoMonto;
+  // El % de incremento se calcula sobre el total YA con descuento aplicado
+  // (lo que de verdad se está financiando) — mismo criterio que usa
+  // registrar_venta en el server.
+  const incrementoMonto = esCeapp
+    ? incrementoTipo === "porcentaje"
+      ? Math.round((totalConDescuento * incrementoValor) / 100)
+      : incrementoTipo === "fijo"
+        ? incrementoValor
+        : 0
+    : 0;
+  const totalNeto = totalConDescuento + incrementoMonto;
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -302,6 +319,8 @@ export function VentaForm({
       <input type="hidden" name="items" value={JSON.stringify(items)} />
       <input type="hidden" name="descuento_tipo" value={descuentoTipo} />
       <input type="hidden" name="descuento_valor" value={descuentoValor} />
+      <input type="hidden" name="incremento_tipo" value={incrementoTipo} />
+      <input type="hidden" name="incremento_valor" value={incrementoValor} />
       <input type="hidden" name="categorias_licencia" value={JSON.stringify(categoriasLicencia)} />
 
       <Field label="Cliente" required>
@@ -456,21 +475,31 @@ export function VentaForm({
           </ul>
         )}
         <div className="flex flex-col gap-0.5 border-t border-slate-200 pt-2 text-sm">
-          <div className={`flex items-center justify-between ${descuentoMonto > 0 ? "text-slate-500" : "font-semibold text-slate-900"}`}>
-            <span>{descuentoMonto > 0 ? "Subtotal" : "Total"}</span>
+          <div
+            className={`flex items-center justify-between ${
+              descuentoMonto > 0 || incrementoMonto > 0 ? "text-slate-500" : "font-semibold text-slate-900"
+            }`}
+          >
+            <span>{descuentoMonto > 0 || incrementoMonto > 0 ? "Subtotal" : "Total"}</span>
             <span>{formatCOP(total)}</span>
           </div>
           {descuentoMonto > 0 ? (
-            <>
-              <div className="flex items-center justify-between text-emerald-600">
-                <span>Descuento</span>
-                <span>−{formatCOP(descuentoMonto)}</span>
-              </div>
-              <div className="flex items-center justify-between font-semibold text-slate-900">
-                <span>Total con descuento</span>
-                <span>{formatCOP(totalNeto)}</span>
-              </div>
-            </>
+            <div className="flex items-center justify-between text-emerald-600">
+              <span>Descuento</span>
+              <span>−{formatCOP(descuentoMonto)}</span>
+            </div>
+          ) : null}
+          {incrementoMonto > 0 ? (
+            <div className="flex items-center justify-between text-amber-600">
+              <span>Incremento</span>
+              <span>+{formatCOP(incrementoMonto)}</span>
+            </div>
+          ) : null}
+          {descuentoMonto > 0 || incrementoMonto > 0 ? (
+            <div className="flex items-center justify-between font-semibold text-slate-900">
+              <span>Total</span>
+              <span>{formatCOP(totalNeto)}</span>
+            </div>
           ) : null}
         </div>
       </section>
@@ -511,6 +540,21 @@ export function VentaForm({
           onValorChange={setDescuentoValor}
         />
       </Field>
+
+      {esCeapp ? (
+        <Field label="Incremento por financiadora (opcional)">
+          <p className="mb-1.5 -mt-1 text-xs text-slate-400">
+            Para cuando el cliente paga con Brilla, Addi o Sistecrédito — esas cobran un % de más, que se le
+            suma al total antes de cobrar.
+          </p>
+          <IncrementoPicker
+            tipo={incrementoTipo}
+            valor={incrementoValor}
+            onTipoChange={setIncrementoTipo}
+            onValorChange={setIncrementoValor}
+          />
+        </Field>
+      ) : null}
 
       {tramitadores.length > 0 ? (
         <Field label="Tramitador o asesor referido (opcional)">

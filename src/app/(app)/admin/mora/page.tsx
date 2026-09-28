@@ -15,6 +15,7 @@ type Fila = {
   concepto: string;
   monto: number;
   descuento: number;
+  incremento: number;
   pagado: number;
   saldo: number;
 };
@@ -32,7 +33,7 @@ export default async function MoraPage({
 
   let query = supabase
     .from("ventas")
-    .select("id, sede_id, cliente_id, concepto, monto, descuento, created_at")
+    .select("id, sede_id, cliente_id, concepto, monto, descuento, incremento, created_at")
     .eq("estado", "abonada")
     .order("created_at", { ascending: true });
   if (sedeFilter) query = query.eq("sede_id", sedeFilter);
@@ -61,7 +62,7 @@ export default async function MoraPage({
   const porCliente = new Map<string, { clienteId: string; filas: Fila[]; totalSaldo: number }>();
   for (const v of ventas ?? []) {
     const pagado = pagadoDeVenta(v.id);
-    const saldo = v.monto - v.descuento - pagado;
+    const saldo = v.monto - v.descuento + v.incremento - pagado;
     if (saldo <= 0) continue;
     const entry = porCliente.get(v.cliente_id) ?? { clienteId: v.cliente_id, filas: [], totalSaldo: 0 };
     entry.filas.push({
@@ -70,6 +71,7 @@ export default async function MoraPage({
       concepto: v.concepto,
       monto: v.monto,
       descuento: v.descuento,
+      incremento: v.incremento,
       pagado,
       saldo,
     });
@@ -144,12 +146,13 @@ export default async function MoraPage({
                         <span className="text-slate-400"> · {sedeName(f.sedeId)}</span>
                         <span className="text-slate-500">
                           {" "}
-                          · Pagado {formatCOP(f.pagado)} de {formatCOP(f.monto - f.descuento)}
+                          · Pagado {formatCOP(f.pagado)} de {formatCOP(f.monto - f.descuento + f.incremento)}
                         </span>
                       </div>
                       <DescuentoForm
                         ventaId={f.ventaId}
                         montoBruto={f.monto}
+                        incremento={f.incremento}
                         pagado={f.pagado}
                         descuentoActual={f.descuento}
                       />
