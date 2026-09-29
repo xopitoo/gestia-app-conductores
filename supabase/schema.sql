@@ -2487,6 +2487,40 @@ create trigger ventas_lock_privileged_columns
   before update on public.ventas
   for each row execute function public.lock_venta_privileged_columns();
 
+-- Mismo mecanismo otra vez, para clientes: un recepcionista ahora puede
+-- actualizar datos de contacto/RUNT como "actualización de datos" (ver
+-- clientes_update_recepcionista_datos más abajo), pero nunca su documento,
+-- nombre, sexo, sede u otros campos que sigan siendo exclusivos del admin.
+create or replace function public.lock_cliente_privileged_columns()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if public.current_role() is distinct from 'admin' and (
+    new.tipo_documento is distinct from old.tipo_documento
+    or new.numero_documento is distinct from old.numero_documento
+    or new.nombre_completo is distinct from old.nombre_completo
+    or new.sexo is distinct from old.sexo
+    or new.sede_id is distinct from old.sede_id
+    or new.organization_id is distinct from old.organization_id
+    or new.active is distinct from old.active
+    or new.fingerprints_enrolled is distinct from old.fingerprints_enrolled
+    or new.licencia_particular_vence is distinct from old.licencia_particular_vence
+    or new.licencia_publico_vence is distinct from old.licencia_publico_vence
+    or new.created_by is distinct from old.created_by
+  ) then
+    raise exception 'No autorizado para modificar esos campos del cliente';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists clientes_lock_privileged_columns on public.clientes;
+create trigger clientes_lock_privileged_columns
+  before update on public.clientes
+  for each row execute function public.lock_cliente_privileged_columns();
+
 -- =========================================================
 -- RLS
 -- =========================================================
@@ -2596,11 +2630,18 @@ create policy "clientes_update_admin" on public.clientes
   using (public.current_role() = 'admin' and organization_id = public.current_org_id())
   with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
 
--- Sin policy de update para recepcionista a propósito: un recepcionista
--- puede crear clientes (ver clientes_insert_recepcionista) pero no
--- modificar NINGÚN campo después — ni siquiera activar/desactivar. Solo
--- el admin corrige datos de un cliente ya cargado.
+-- Un recepcionista puede "actualizar datos" de cualquier cliente de la
+-- organización (no solo los de su sede — mismo criterio de
+-- clientes_select_sede_recepcionista: la misma persona pasa por más de una
+-- sede) pero SOLO fecha de nacimiento, teléfono, correo y estado de RUNT —
+-- el trigger clientes_lock_privileged_columns de arriba bloquea cualquier
+-- otro campo (documento, nombre, sede, activo/inactivo, etc.), que sigue
+-- siendo exclusivo del admin.
 drop policy if exists "clientes_update_recepcionista" on public.clientes;
+create policy "clientes_update_recepcionista" on public.clientes
+  for update
+  using (public.current_role() = 'recepcionista' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'recepcionista' and organization_id = public.current_org_id());
 
 -- productos: catálogo de la organización. Cualquier miembro (admin o
 -- recepcionista) puede leerlo para elegir productos al registrar una

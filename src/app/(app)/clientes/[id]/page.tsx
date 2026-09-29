@@ -5,7 +5,7 @@ import { ArrowLeft, FileText, ShoppingBag } from "lucide-react";
 import { getViewerContext, requireOpenCaja } from "@/lib/viewer";
 import { actualizarCliente } from "../actions";
 import { ClienteForm } from "../cliente-form";
-import { RuntBadge } from "../runt-badge";
+import { DatosBasicosForm } from "../datos-basicos-form";
 import { RuntConsultaLink } from "@/components/runt-link";
 import { buttonClass } from "@/lib/ui";
 import { formatDate } from "@/lib/format";
@@ -107,29 +107,25 @@ export default async function ClienteDetailPage({
           />
         </div>
       ) : (
-        <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
-          <p className="mb-4 rounded-lg bg-slate-50 px-3.5 py-2.5 text-xs text-slate-500">
-            Solo un administrador puede modificar los datos de un cliente ya cargado.
-          </p>
-          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <ReadOnlyField label="Tipo de documento" value={TIPO_LABEL[cliente.tipo_documento] ?? cliente.tipo_documento} />
-            <ReadOnlyField label="Número de documento" value={cliente.numero_documento} />
-            <ReadOnlyField label="Nombre completo" value={cliente.nombre_completo} />
-            <ReadOnlyField label="Sexo" value={cliente.sexo ?? "—"} />
-            <ReadOnlyField label="Fecha de nacimiento" value={cliente.fecha_nacimiento ?? "—"} />
-            <ReadOnlyField
-              label="Teléfono"
-              value={cliente.telefono ? `${cliente.telefono_pais} ${cliente.telefono}` : "—"}
-            />
-            <ReadOnlyField label="Correo electrónico" value={cliente.correo_electronico ?? "—"} />
-            <div>
-              <dt className="text-xs text-slate-400">RUNT</dt>
-              <dd className="mt-1">
-                <RuntBadge runt={cliente.runt} />
-              </dd>
-            </div>
-            <ReadOnlyField label="Estado" value={cliente.active ? "Activo" : "Inactivo"} />
-          </dl>
+        <div className="flex flex-col gap-4">
+          <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
+            <p className="mb-4 rounded-lg bg-slate-50 px-3.5 py-2.5 text-xs text-slate-500">
+              El documento, nombre, sexo y sede solo los corrige un administrador. Vos podés actualizar el
+              resto de sus datos acá abajo.
+            </p>
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <ReadOnlyField label="Tipo de documento" value={TIPO_LABEL[cliente.tipo_documento] ?? cliente.tipo_documento} />
+              <ReadOnlyField label="Número de documento" value={cliente.numero_documento} />
+              <ReadOnlyField label="Nombre completo" value={cliente.nombre_completo} />
+              <ReadOnlyField label="Sexo" value={cliente.sexo ?? "—"} />
+              <ReadOnlyField label="Estado" value={cliente.active ? "Activo" : "Inactivo"} />
+            </dl>
+          </div>
+
+          <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
+            <h2 className="mb-4 text-sm font-semibold text-slate-800">Actualización de datos</h2>
+            <DatosBasicosForm cliente={cliente} />
+          </div>
         </div>
       )}
     </div>

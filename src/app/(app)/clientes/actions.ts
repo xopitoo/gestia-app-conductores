@@ -125,6 +125,53 @@ export async function actualizarCliente(
   redirect("/clientes");
 }
 
+/**
+ * Versión acotada de actualizarCliente para recepcionista: "actualización de
+ * datos" del cliente — fecha de nacimiento, teléfono, correo y RUNT nada
+ * más. El resto de los campos ni siquiera se leen del formData acá (y aunque
+ * se mandaran, clientes_lock_privileged_columns los rechaza en la base de
+ * datos) — así que esta función es intencionalmente angosta, no una versión
+ * recortada de la otra.
+ */
+export async function actualizarDatosCliente(
+  _prevState: ClienteFormState,
+  formData: FormData,
+): Promise<ClienteFormState> {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin" && profile.role !== "recepcionista") {
+    return { error: "No autorizado." };
+  }
+
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "Cliente inválido." };
+
+  const telefono = String(formData.get("telefono") ?? "").replace(/\D/g, "") || null;
+  const errorTelefono = validarTelefono(telefono);
+  if (errorTelefono) return { error: errorTelefono };
+  const fecha_nacimiento = String(formData.get("fecha_nacimiento") ?? "") || null;
+  const errorFecha = validarFechaNacimiento(fecha_nacimiento);
+  if (errorFecha) return { error: errorFecha };
+
+  const { error } = await supabase
+    .from("clientes")
+    .update({
+      fecha_nacimiento,
+      telefono_pais: String(formData.get("telefono_pais") ?? "+57").trim() || "+57",
+      telefono,
+      correo_electronico: String(formData.get("correo_electronico") ?? "").trim() || null,
+      runt: String(formData.get("runt") ?? "false") === "true",
+    })
+    .eq("id", id);
+
+  if (error) {
+    return { error: "No se pudieron guardar los datos." };
+  }
+
+  revalidatePath(`/clientes/${id}`);
+  revalidatePath("/clientes");
+  return {};
+}
+
 export async function toggleClienteActive(formData: FormData) {
   const { supabase, profile } = await getViewerContext();
   if (profile.role !== "admin") return;
