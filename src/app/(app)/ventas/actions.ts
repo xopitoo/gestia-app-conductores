@@ -89,9 +89,7 @@ export async function registrarVenta(
     if (error.message.includes("superar el total")) {
       return { error: "El pago no puede superar el total de la orden." };
     }
-    // TEMPORAL: mostrar el error real de la base de datos para diagnosticar
-    // por qué falla el registro — sacar esto apenas se identifique la causa.
-    return { error: `No se pudo registrar la venta. Detalle: ${error.message}` };
+    return { error: "No se pudo registrar la venta." };
   }
 
   revalidatePath("/ventas");
