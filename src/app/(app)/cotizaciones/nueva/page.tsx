@@ -26,13 +26,17 @@ export default async function NuevaCotizacionPage({
   }
 
   const [{ data: clientes }, { data: productos }] = await Promise.all([
-    // Toda la organización, no solo esta sede — mismo criterio que
-    // /ventas/nueva (ver clientes_select_sede_recepcionista en el schema).
+    // Solo esta sede: con miles de clientes en la org, traer TODOS sin
+    // límite se topaba con el tope de 1000 filas de PostgREST y algunos
+    // quedaban afuera del desplegable sin aviso (ver el mismo ajuste en
+    // /ventas/nueva). Esta pantalla no tiene un "precargar cliente de otra
+    // sede" como Nueva orden, así que alcanza con acotar a la sede.
     supabase
       .from("clientes")
       .select(
         "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, licencia_particular_vence, licencia_publico_vence, created_by, created_at, updated_at",
       )
+      .eq("sede_id", sedeId)
       .eq("active", true)
       .order("created_at", { ascending: false }),
     supabase

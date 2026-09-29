@@ -32,7 +32,10 @@ export default async function NuevaVentaPage({
     );
   }
 
-  const [{ data: sesionAbierta }, { data: clientes }, { data: productos }, { data: tramitadores }] =
+  const clienteColumns =
+    "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, licencia_particular_vence, licencia_publico_vence, created_by, created_at, updated_at";
+
+  const [{ data: sesionAbierta }, { data: clientesSede }, { data: productos }, { data: tramitadores }] =
     await Promise.all([
       supabase
         .from("caja_sesiones")
@@ -40,18 +43,13 @@ export default async function NuevaVentaPage({
         .eq("sede_id", sedeId)
         .eq("estado", "abierta")
         .maybeSingle(),
-      // Toda la organización, no solo esta sede: la misma persona suele
-      // pasar por más de una sede de CEAPP (examen médico en Valorar, curso
-      // en una sede CEAPP), y un cliente es un solo registro por documento
-      // — no tiene sentido esconderle a la recepcionista uno que ya existe
-      // en otra sede (ver clientes_select_sede_recepcionista en el schema).
-      supabase
-        .from("clientes")
-        .select(
-          "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, licencia_particular_vence, licencia_publico_vence, created_by, created_at, updated_at",
-        )
-        .eq("active", true)
-        .order("created_at", { ascending: false }),
+      // Solo esta sede por defecto (con miles de clientes en la org, pedir
+      // TODOS sin límite se topaba con el tope de 1000 filas de
+      // PostgREST — un cliente viejo/de otra sede quedaba afuera del
+      // desplegable sin ningún aviso, mostrando otro en su lugar. Para
+      // vender a alguien de otra sede, se llega acá desde "Crear venta" en
+      // su ficha (ver más abajo, se agrega aparte y siempre entra).
+      supabase.from("clientes").select(clienteColumns).eq("sede_id", sedeId).eq("active", true).order("created_at", { ascending: false }),
       supabase
         .from("productos")
         .select("id, organization_id, sede_id, nombre, descripcion, precio, categoria, active, created_by, created_at, updated_at")
@@ -81,6 +79,20 @@ export default async function NuevaVentaPage({
         .select("id, tramitador_id, producto_id, organization_id, precio_especial, created_at, updated_at")
         .in("tramitador_id", tramitadorIds)
     : { data: [] };
+
+  // Si "Crear venta" trajo precargado un cliente de OTRA sede (o uno viejo
+  // que el corte de arriba dejó afuera), lo traemos aparte y lo agregamos
+  // a la lista — así el desplegable siempre lo encuentra y lo muestra bien,
+  // sin depender de que haya entrado en los primeros resultados de su sede.
+  let clientes = clientesSede ?? [];
+  if (clienteParam && !clientes.some((c) => c.id === clienteParam)) {
+    const { data: clientePrecargado } = await supabase
+      .from("clientes")
+      .select(clienteColumns)
+      .eq("id", clienteParam)
+      .maybeSingle();
+    if (clientePrecargado) clientes = [clientePrecargado, ...clientes];
+  }
 
   return (
     <div className="flex flex-col gap-6">
