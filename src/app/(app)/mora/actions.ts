@@ -44,7 +44,7 @@ export async function aplicarDescuento(
     return { error: "No se pudo aplicar el descuento." };
   }
 
-  revalidatePath("/admin/mora");
+  revalidatePath("/mora");
   revalidatePath(`/ventas/${ventaId}`);
   revalidatePath("/ventas");
   revalidatePath("/dashboard");

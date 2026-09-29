@@ -128,6 +128,9 @@ export function Sidebar({
           <NavLink href="/tramitadores" icon={<Handshake className="h-4.5 w-4.5" />} collapsed={collapsed}>
             Tramitadores
           </NavLink>
+          <NavLink href="/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
+            Clientes en mora
+          </NavLink>
 
           {role === "admin" ? (
             <>
@@ -146,9 +149,6 @@ export function Sidebar({
               </NavLink>
               <NavLink href="/admin/usuarios" icon={<UserCog className="h-4.5 w-4.5" />} collapsed={collapsed}>
                 Usuarios
-              </NavLink>
-              <NavLink href="/admin/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
-                Clientes en mora
               </NavLink>
               <NavLink href="/admin/marketing" icon={<Megaphone className="h-4.5 w-4.5" />} collapsed={collapsed}>
                 Marketing

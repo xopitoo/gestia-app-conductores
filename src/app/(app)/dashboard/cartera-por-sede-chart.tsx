@@ -32,7 +32,7 @@ export function CarteraPorSedeChart({ sedes }: { sedes: CarteraPorSede[] }) {
         return (
           <Link
             key={s.sedeId}
-            href={`/admin/mora?sede=${s.sedeId}`}
+            href={`/mora?sede=${s.sedeId}`}
             className="flex flex-col gap-1 rounded-lg -m-1 p-1 transition hover:bg-slate-50"
             title="Ver quién debe en esta sede"
           >
