@@ -68,8 +68,10 @@ export default async function ClienteDetailPage({
               <FileText className="h-4 w-4" />
               Estado de cuenta
             </Link>
+            {/* prefetch={false}: ver el mismo comentario en /clientes */}
             <Link
               href={`/ventas/nueva?sede=${cliente.sede_id}&cliente=${cliente.id}`}
+              prefetch={false}
               className={buttonClass("primary")}
             >
               <ShoppingBag className="h-4 w-4" />

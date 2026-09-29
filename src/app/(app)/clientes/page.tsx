@@ -142,8 +142,14 @@ export default async function ClientesPage({
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
+                  {/* prefetch={false}: /ventas/nueva es la misma ruta para
+                      cualquier cliente, solo cambia el query string — sin
+                      esto, Next puede reusar en caché el RSC de OTRO
+                      cliente visitado antes y precargar el formulario con
+                      la persona equivocada. */}
                   <Link
                     href={`/ventas/nueva?sede=${cliente.sede_id}&cliente=${cliente.id}`}
+                    prefetch={false}
                     className={`mr-3 ${linkClass("primary")}`}
                   >
                     Crear venta
