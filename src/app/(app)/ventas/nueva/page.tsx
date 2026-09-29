@@ -6,6 +6,12 @@ import { SedeSelect } from "@/components/sede-select";
 import { VentaForm } from "../venta-form";
 
 export const metadata: Metadata = { title: "Registrar orden | Gestia App Conductores" };
+// Esta página SIEMPRE depende de los query params (sede/cliente) para
+// decidir a quién precargar — nunca se puede servir cacheada, ni desde el
+// router cache del cliente ni desde el full route cache del server, por
+// más que prefetch={false} en los links ya debería alcanzar por sí solo.
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 
 export default async function NuevaVentaPage({
   searchParams,
