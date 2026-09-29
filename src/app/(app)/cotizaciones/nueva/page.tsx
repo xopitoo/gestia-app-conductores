@@ -77,7 +77,9 @@ export default async function NuevaCotizacionPage({
         </div>
       ) : (
         <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
-          <CotizacionForm sedeId={sedeId} clientes={clientes ?? []} productos={productosSede} />
+          {/* key={sedeId}: mismo motivo que en VentaForm — reinicia el
+              carrito al cambiar de sede en vez de arrastrar datos viejos. */}
+          <CotizacionForm key={sedeId} sedeId={sedeId} clientes={clientes ?? []} productos={productosSede} />
         </div>
       )}
     </div>
