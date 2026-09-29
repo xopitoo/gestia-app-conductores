@@ -288,7 +288,7 @@ export default async function DashboardPage({
     { nombre: "Directo (sin tramitador)", ventas: ventasDirectasMes },
   ].sort((a, b) => b.ventas - a.ventas || a.nombre.localeCompare(b.nombre));
   const totalReporteTramitadores = reporteTramitadores.reduce((acc, r) => acc + r.ventas, 0);
-  const nombreMesReporte = `${new Intl.DateTimeFormat("es-CO", { month: "long" }).format(now).toUpperCase()} ${anioActual}`;
+  const nombreMesReporte = `${new Intl.DateTimeFormat("es-CO", { month: "long", timeZone: "America/Bogota" }).format(now).toUpperCase()} ${anioActual}`;
   const TOP_TRAMITADORES = 7;
   const topTramitadores = reporteTramitadores.slice(0, TOP_TRAMITADORES);
   const restoTramitadores = reporteTramitadores.slice(TOP_TRAMITADORES);
