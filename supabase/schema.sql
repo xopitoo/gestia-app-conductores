@@ -2497,6 +2497,11 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
+  -- licencia_particular_vence/licencia_publico_vence quedan AFUERA a
+  -- propósito: no son un dato que alguien "edita" (ningún form las expone),
+  -- las recalcula sola actualizar_vencimiento_licencia como efecto de
+  -- CUALQUIER venta con categorías de licencia — admin o recepcionista. Si
+  -- se bloquean acá, se rompe el registro de esa venta para cualquiera.
   if public.current_role() is distinct from 'admin' and (
     new.tipo_documento is distinct from old.tipo_documento
     or new.numero_documento is distinct from old.numero_documento
@@ -2506,8 +2511,6 @@ begin
     or new.organization_id is distinct from old.organization_id
     or new.active is distinct from old.active
     or new.fingerprints_enrolled is distinct from old.fingerprints_enrolled
-    or new.licencia_particular_vence is distinct from old.licencia_particular_vence
-    or new.licencia_publico_vence is distinct from old.licencia_publico_vence
     or new.created_by is distinct from old.created_by
   ) then
     raise exception 'No autorizado para modificar esos campos del cliente';

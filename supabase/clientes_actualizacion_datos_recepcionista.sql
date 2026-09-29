@@ -22,9 +22,12 @@ begin
     or new.organization_id is distinct from old.organization_id
     or new.active is distinct from old.active
     or new.fingerprints_enrolled is distinct from old.fingerprints_enrolled
-    or new.licencia_particular_vence is distinct from old.licencia_particular_vence
-    or new.licencia_publico_vence is distinct from old.licencia_publico_vence
     or new.created_by is distinct from old.created_by
+    -- licencia_particular_vence/licencia_publico_vence quedan afuera a
+    -- propósito: las recalcula sola actualizar_vencimiento_licencia en
+    -- cada venta con categorías de licencia, para cualquiera que venda —
+    -- bloquearlas acá rompe el registro de esas ventas (ver
+    -- fix_lock_cliente_licencia.sql).
   ) then
     raise exception 'No autorizado para modificar esos campos del cliente';
   end if;
