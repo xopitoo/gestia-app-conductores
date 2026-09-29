@@ -59,9 +59,19 @@ export default async function AppLayout({
     (clientesConLicencia ?? []).map((c) => ({ ...c, es_valorar: c.sede_id === sedeValorarId })),
   );
 
+  // "Clientes en mora" solo para admin y para la sede CEAPP CALI por ahora
+  // (decisión del negocio: todavía no se activó ese seguimiento en las
+  // demás sedes) — ver el mismo gate en /mora/page.tsx.
+  const sedeCaliId = sedes.find((s) => s.name === "CEAPP CALI")?.id;
+  const puedeVerMora = profile.role === "admin" || profile.sede_id === sedeCaliId;
+
   return (
     <div className="flex min-h-svh gap-3 bg-gradient-to-br from-indigo-100 via-slate-50 to-pink-100 p-0 sm:p-3 print:block print:bg-white print:p-0">
-      <Sidebar role={profile.role as "admin" | "recepcionista"} orgName={organization.name} />
+      <Sidebar
+        role={profile.role as "admin" | "recepcionista"}
+        orgName={organization.name}
+        showMora={puedeVerMora}
+      />
 
       <main className="flex-1 overflow-x-hidden bg-white/70 shadow-sm shadow-slate-200/70 sm:rounded-2xl print:overflow-visible print:rounded-none print:bg-white print:shadow-none">
         <div className="mx-auto max-w-6xl px-4 pt-16 pb-6 sm:px-6 sm:py-8 print:mx-0 print:max-w-none print:p-0">

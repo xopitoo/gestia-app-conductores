@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getViewerContext, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { formatCOP } from "@/lib/format";
@@ -28,9 +29,19 @@ export default async function MoraPage({
   const ctx = await getViewerContext();
   const { supabase, profile, sedes } = ctx;
   const esAdmin = profile.role === "admin";
+
+  // Mismo gate que el link del sidebar (ver layout.tsx): por ahora "Clientes
+  // en mora" solo está activado para admin y para la sede CEAPP CALI — un
+  // recepcionista de otra sede no debería poder entrar aunque escriba la
+  // URL a mano.
+  const sedeCaliId = sedes.find((s) => s.name === "CEAPP CALI")?.id;
+  if (!esAdmin && profile.sede_id !== sedeCaliId) {
+    redirect("/dashboard");
+  }
+
   // Un recepcionista siempre queda limitado a su propia sede acá adentro
-  // (resolveSedeFilter ya lo fuerza), así que no hace falta un redirect ni
-  // un gate: la RLS de ventas/clientes tampoco le dejaría ver otra sede.
+  // (resolveSedeFilter ya lo fuerza), así que no hace falta nada más: la
+  // RLS de ventas/clientes tampoco le dejaría ver otra sede.
   const sedeFilter = resolveSedeFilter(ctx, sedeParam);
 
   let query = supabase

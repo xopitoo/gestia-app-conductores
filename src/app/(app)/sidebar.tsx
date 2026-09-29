@@ -33,9 +33,12 @@ const STORAGE_KEY = "conductores-pos:sidebar-collapsed";
 export function Sidebar({
   role,
   orgName,
+  showMora,
 }: {
   role: "admin" | "recepcionista";
   orgName: string;
+  /** Admin siempre; recepcionista solo si su sede tiene la mora activada (hoy, solo CEAPP CALI). */
+  showMora: boolean;
 }) {
   // Lazy initializer (no useEffect): evita el "flash" de expandido→contraído
   // que se vería si se leyera localStorage recién después del primer paint.
@@ -128,9 +131,11 @@ export function Sidebar({
           <NavLink href="/tramitadores" icon={<Handshake className="h-4.5 w-4.5" />} collapsed={collapsed}>
             Tramitadores
           </NavLink>
-          <NavLink href="/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
-            Clientes en mora
-          </NavLink>
+          {showMora ? (
+            <NavLink href="/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
+              Clientes en mora
+            </NavLink>
+          ) : null}
 
           {role === "admin" ? (
             <>
