@@ -44,8 +44,17 @@ export default async function ClientesPage({
     .order("created_at", { ascending: false })
     .range(from, to);
 
+  // Sin búsqueda: cada recepcionista ve solo los clientes de su propia
+  // sede (como antes) — no queremos la lista completa de la organización
+  // mezclada por defecto. Buscando por documento o nombre sí cruza a
+  // cualquier sede (clientes_select_sede_recepcionista ya lo permite a
+  // nivel de RLS): para vender a alguien que se registró en otra sede
+  // (ej. examen médico en Valorar, curso en una sede CEAPP) hace falta
+  // poder encontrarlo por su documento sin importar dónde quedó cargado.
   if (q) {
     query = query.or(`nombre_completo.ilike.%${q}%,numero_documento.ilike.%${q}%`);
+  } else if (profile.role === "recepcionista" && profile.sede_id) {
+    query = query.eq("sede_id", profile.sede_id);
   }
 
   const { data: clientes, count } = await query;
@@ -84,7 +93,18 @@ export default async function ClientesPage({
             className="w-full rounded-lg border border-slate-300 py-2.5 pr-3 pl-9 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
           />
         </div>
+        <button type="submit" className={buttonClass("primary")}>
+          <Search className="h-4 w-4" />
+          Buscar
+        </button>
       </form>
+      {profile.role === "recepcionista" ? (
+        <p className="-mt-3 text-xs text-slate-400">
+          {q
+            ? "Buscando en todas las sedes."
+            : "Mostrando los clientes de tu sede. Buscá por documento para encontrar clientes de otra sede."}
+        </p>
+      ) : null}
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full text-sm">
@@ -94,7 +114,7 @@ export default async function ClientesPage({
               <th className="px-4 py-3">Número</th>
               <th className="px-4 py-3">Nombre completo</th>
               <th className="px-4 py-3">Contacto</th>
-              {profile.role === "admin" ? <th className="px-4 py-3">Sede</th> : null}
+              {profile.role === "admin" || q ? <th className="px-4 py-3">Sede</th> : null}
               <th className="px-4 py-3">Huellas</th>
               <th className="px-4 py-3">RUNT</th>
               <th className="px-4 py-3">Estado</th>
@@ -124,7 +144,7 @@ export default async function ClientesPage({
                     <p className="text-xs text-slate-400">{cliente.correo_electronico}</p>
                   ) : null}
                 </td>
-                {profile.role === "admin" ? (
+                {profile.role === "admin" || q ? (
                   <td className="px-4 py-3 text-slate-600">{sedeName(cliente.sede_id)}</td>
                 ) : null}
                 <td className="px-4 py-3">
@@ -183,7 +203,7 @@ export default async function ClientesPage({
             ))}
             {(clientes ?? []).length === 0 ? (
               <tr>
-                <td colSpan={profile.role === "admin" ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={profile.role === "admin" || q ? 9 : 8} className="px-4 py-8 text-center text-slate-400">
                   {q ? "No hay clientes que coincidan con la búsqueda." : "Todavía no hay clientes cargados."}
                 </td>
               </tr>
