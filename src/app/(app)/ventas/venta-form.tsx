@@ -327,7 +327,7 @@ export function VentaForm({
         <select
           name="cliente_id"
           required
-          defaultValue={clienteIdInicial ?? ""}
+          value={clienteId}
           onChange={(e) => setClienteId(e.target.value)}
           className={inputClass}
         >

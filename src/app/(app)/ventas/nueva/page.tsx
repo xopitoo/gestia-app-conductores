@@ -112,12 +112,14 @@ export default async function NuevaVentaPage({
         <div className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
           <VentaForm
             // Reinicia todo el estado del form (carrito, tramitador,
-            // pagos...) al cambiar de sede con el selector de arriba — sin
-            // esto, VentaForm es un client component que no se entera de
-            // que cambiaron sedeId/clientes/productos/tramitadores (son
-            // props nuevas, no un remount) y se queda con datos de la sede
-            // anterior "pegados" aunque ya no se vean seleccionados.
-            key={sedeId}
+            // pagos, cliente...) al cambiar de sede O de cliente
+            // precargado (ej. entrar a "Crear venta" desde la ficha de un
+            // cliente distinto sin recargar la página) — sin esto,
+            // VentaForm es un client component que no se entera de que
+            // cambiaron las props (son props nuevas, no un remount) y se
+            // queda con datos de la sede/cliente anterior "pegados" aunque
+            // ya no se vean seleccionados.
+            key={`${sedeId}-${clienteParam ?? "sin-precargar"}`}
             sedeId={sedeId}
             esCeapp={sedes.find((s) => s.id === sedeId)?.name !== "C.R.C. VALORAR"}
             clientes={clientes ?? []}
