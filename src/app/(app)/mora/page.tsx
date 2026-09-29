@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Search } from "lucide-react";
 import { getViewerContext, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { formatCOP } from "@/lib/format";
-import { linkClass } from "@/lib/ui";
+import { buttonClass, linkClass } from "@/lib/ui";
 import { DescuentoForm } from "./descuento-form";
 
 export const metadata: Metadata = { title: "Clientes en mora | Gestia App Conductores" };
@@ -23,9 +24,9 @@ type Fila = {
 export default async function MoraPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sede?: string }>;
+  searchParams: Promise<{ sede?: string; q?: string }>;
 }) {
-  const { sede: sedeParam } = await searchParams;
+  const { sede: sedeParam, q } = await searchParams;
   const ctx = await getViewerContext();
   const { supabase, profile, sedes } = ctx;
   const esAdmin = profile.role === "admin";
@@ -92,8 +93,23 @@ export default async function MoraPage({
     porCliente.set(v.cliente_id, entry);
   }
 
-  const filasClientes = [...porCliente.values()].sort((a, b) => b.totalSaldo - a.totalSaldo);
+  let filasClientes = [...porCliente.values()].sort((a, b) => b.totalSaldo - a.totalSaldo);
   const totalGeneral = filasClientes.reduce((acc, c) => acc + c.totalSaldo, 0);
+
+  // El filtro de texto se aplica DESPUÉS de calcular el total general — así
+  // "Total pendiente por cobrar" sigue mostrando el total real de la sede,
+  // no solo el de los resultados filtrados (evita el efecto raro de que el
+  // total "baje" solo porque estás buscando a alguien puntual).
+  if (q) {
+    const term = q.trim().toLowerCase();
+    filasClientes = filasClientes.filter((c) => {
+      const cliente = clienteInfo(c.clienteId);
+      return (
+        cliente?.nombre_completo.toLowerCase().includes(term) ||
+        cliente?.numero_documento.toLowerCase().includes(term)
+      );
+    });
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -109,6 +125,23 @@ export default async function MoraPage({
         {esAdmin ? <SedeSelect sedes={sedes} currentSedeId={sedeFilter} allowAll /> : null}
       </div>
 
+      <form className="flex max-w-md items-center gap-2">
+        {sedeFilter ? <input type="hidden" name="sede" value={sedeFilter} /> : null}
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Buscar por nombre o documento..."
+            className="w-full rounded-lg border border-slate-300 py-2.5 pr-3 pl-9 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+          />
+        </div>
+        <button type="submit" className={buttonClass("primary")}>
+          <Search className="h-4 w-4" />
+          Buscar
+        </button>
+      </form>
+
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
           Total pendiente por cobrar
@@ -121,7 +154,7 @@ export default async function MoraPage({
 
       {filasClientes.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
-          No hay clientes en mora en este momento.
+          {q ? "No hay clientes en mora que coincidan con la búsqueda." : "No hay clientes en mora en este momento."}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
