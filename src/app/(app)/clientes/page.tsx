@@ -50,7 +50,16 @@ export default async function ClientesPage({
 
   const { data: clientes, count } = await query;
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
-  const sedeName = (id: string) => sedes.find((s) => s.id === id)?.name ?? "—";
+
+  // Un cliente puede ser de otra sede (ver clientes_select_sede_recepcionista
+  // en el schema — la lista ya es org-wide), así que para el nombre de sede
+  // acá no alcanza con ctx.sedes: para un recepcionista eso trae solo la
+  // propia. sedes_select_org sí es org-wide para cualquier rol.
+  const sedesTodas =
+    profile.role === "recepcionista"
+      ? (await supabase.from("sedes").select("id, name").eq("organization_id", profile.organization_id!)).data ?? sedes
+      : sedes;
+  const sedeName = (id: string) => sedesTodas.find((s) => s.id === id)?.name ?? "—";
 
   return (
     <div className="flex flex-col gap-6">

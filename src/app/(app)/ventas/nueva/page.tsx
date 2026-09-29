@@ -34,12 +34,16 @@ export default async function NuevaVentaPage({
         .eq("sede_id", sedeId)
         .eq("estado", "abierta")
         .maybeSingle(),
+      // Toda la organización, no solo esta sede: la misma persona suele
+      // pasar por más de una sede de CEAPP (examen médico en Valorar, curso
+      // en una sede CEAPP), y un cliente es un solo registro por documento
+      // — no tiene sentido esconderle a la recepcionista uno que ya existe
+      // en otra sede (ver clientes_select_sede_recepcionista en el schema).
       supabase
         .from("clientes")
         .select(
           "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, licencia_particular_vence, licencia_publico_vence, created_by, created_at, updated_at",
         )
-        .eq("sede_id", sedeId)
         .eq("active", true)
         .order("created_at", { ascending: false }),
       supabase

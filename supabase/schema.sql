@@ -2563,12 +2563,19 @@ drop policy if exists "clientes_select_org_admin" on public.clientes;
 create policy "clientes_select_org_admin" on public.clientes
   for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
 
+-- Org-wide, no solo la propia sede: la misma persona suele pasar por más
+-- de una sede de la organización (ej. examen médico en C.R.C. Valorar y
+-- curso en una sede CEAPP) — un cliente sigue siendo UN solo registro con
+-- UN documento (unique (organization_id, tipo_documento, numero_documento)
+-- más abajo), así que cualquier recepcionista de la organización necesita
+-- poder encontrarlo para venderle, sin importar en qué sede se registró
+-- originalmente. Insertar/editar siguen restringidos por sede (ver esas
+-- policies) — esto es solo lectura.
 drop policy if exists "clientes_select_sede_recepcionista" on public.clientes;
 create policy "clientes_select_sede_recepcionista" on public.clientes
   for select using (
     public.current_role() = 'recepcionista'
     and organization_id = public.current_org_id()
-    and sede_id = public.current_sede_id()
   );
 
 drop policy if exists "clientes_insert_admin" on public.clientes;

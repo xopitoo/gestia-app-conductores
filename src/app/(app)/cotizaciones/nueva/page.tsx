@@ -26,12 +26,13 @@ export default async function NuevaCotizacionPage({
   }
 
   const [{ data: clientes }, { data: productos }] = await Promise.all([
+    // Toda la organización, no solo esta sede — mismo criterio que
+    // /ventas/nueva (ver clientes_select_sede_recepcionista en el schema).
     supabase
       .from("clientes")
       .select(
         "id, organization_id, sede_id, tipo_documento, numero_documento, nombre_completo, sexo, fecha_nacimiento, telefono_pais, telefono, correo_electronico, fingerprints_enrolled, runt, active, licencia_particular_vence, licencia_publico_vence, created_by, created_at, updated_at",
       )
-      .eq("sede_id", sedeId)
       .eq("active", true)
       .order("created_at", { ascending: false }),
     supabase
