@@ -1525,7 +1525,7 @@ begin
       end if;
 
       for v_venta in
-        select v.id, v.monto, v.descuento, v.sede_id
+        select v.id, v.monto, v.descuento, v.incremento, v.sede_id
         from public.ventas v
         where v.tramitador_id = p_tramitador_id
           and v.sede_id = p_sede_id
