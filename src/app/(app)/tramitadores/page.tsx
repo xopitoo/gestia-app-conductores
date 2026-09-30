@@ -159,6 +159,10 @@ export default async function TramitadoresPage({
             className="w-full rounded-lg border border-slate-300 py-2.5 pr-3 pl-9 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
           />
         </div>
+        <button type="submit" className={buttonClass("primary")}>
+          <Search className="h-4 w-4" />
+          Buscar
+        </button>
       </form>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
