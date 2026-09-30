@@ -47,8 +47,34 @@ export function PagoLines({
   const [comprobantes, setComprobantes] = useState<Record<number, string>>({});
 
   const pagado = pagos.reduce((acc, p) => acc + (Number(p.monto) || 0), 0);
-  const saldo = total - pagado;
-  const requierePin = allowPin && pagado < total * 0.5;
+  // Si el cliente paga en efectivo con billetes de más (ej. total $150, paga
+  // con $200), no tiene sentido bloquearlo a digitar exactamente $150 — se
+  // digita lo que entregó y acá se calcula el vuelto. Solo se auto-calcula
+  // cuando TODO el pago es en efectivo: si hay un método mezclado (ej.
+  // efectivo + tarjeta), no hay forma de saber si el excedente es vuelto de
+  // verdad o un typo en el monto de la tarjeta, así que ahí se sigue
+  // exigiendo que no supere el total (el server lo rechaza igual que antes).
+  const lineasConMonto = pagos.filter((p) => (Number(p.monto) || 0) > 0);
+  const soloEfectivo = lineasConMonto.length > 0 && lineasConMonto.every((p) => p.metodo_pago === "efectivo");
+  const excedente = Math.max(0, pagado - total);
+  const vuelto = soloEfectivo ? excedente : 0;
+  const excedenteSinCubrir = soloEfectivo ? 0 : excedente;
+  const pagosCargados = pagos
+    .reduce<{ restante: number; lineas: VentaPagoInput[] }>(
+      (acc, p) => {
+        const monto = Number(p.monto) || 0;
+        const quitar = Math.min(monto, acc.restante);
+        return {
+          restante: acc.restante - quitar,
+          lineas: [...acc.lineas, { ...p, monto: monto - quitar }],
+        };
+      },
+      { restante: vuelto, lineas: [] },
+    )
+    .lineas.filter((p) => p.monto > 0);
+  const pagadoCargado = pagosCargados.reduce((acc, p) => acc + (Number(p.monto) || 0), 0);
+  const saldo = total - pagadoCargado;
+  const requierePin = allowPin && pagadoCargado < total * 0.5;
   // Solo al crear la venta (allowPin) tiene sentido dejarla sin ningún pago
   // inicial (ej. el tramitador trae gente y paga al día siguiente) — un
   // abono siempre necesita al menos un monto, si no no hay nada que registrar.
@@ -88,7 +114,7 @@ export function PagoLines({
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
-      <input type="hidden" name="pagos" value={JSON.stringify(pagos)} />
+      <input type="hidden" name="pagos" value={JSON.stringify(pagosCargados)} />
       {allowPin ? <input type="hidden" name="pin" value={pin} /> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -195,9 +221,15 @@ export function PagoLines({
           <span>{formatCOP(total)}</span>
         </div>
         <div className="flex items-center justify-between font-medium text-slate-900">
-          <span>Pagando ahora</span>
+          <span>{vuelto > 0 ? "Recibido" : "Pagando ahora"}</span>
           <span>{formatCOP(pagado)}</span>
         </div>
+        {vuelto > 0 ? (
+          <div className="flex items-center justify-between font-medium text-emerald-700">
+            <span>Devuelta</span>
+            <span>{formatCOP(vuelto)}</span>
+          </div>
+        ) : null}
         {saldo > 0 ? (
           <div className="flex items-center justify-between text-amber-700">
             <span>Queda pendiente</span>
@@ -205,6 +237,13 @@ export function PagoLines({
           </div>
         ) : null}
       </div>
+
+      {excedenteSinCubrir > 0 ? (
+        <p className="text-xs text-red-600">
+          El pago supera el total por {formatCOP(excedenteSinCubrir)} en un método distinto a efectivo — la
+          devuelta solo se calcula sobre lo pagado en efectivo, así que ese excedente no se puede registrar.
+        </p>
+      ) : null}
 
       {requierePin ? (
         <div className="flex flex-col gap-1.5 rounded-lg bg-amber-50 p-3">
