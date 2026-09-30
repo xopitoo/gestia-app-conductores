@@ -11,6 +11,7 @@ import {
   ChevronsRight,
   GraduationCap,
   Handshake,
+  History,
   LayoutDashboard,
   Megaphone,
   Menu,
@@ -167,6 +168,9 @@ export function Sidebar({
               </NavLink>
               <NavLink href="/admin/seguridad" icon={<ShieldCheck className="h-4.5 w-4.5" />} collapsed={collapsed}>
                 Seguridad
+              </NavLink>
+              <NavLink href="/admin/actividad" icon={<History className="h-4.5 w-4.5" />} collapsed={collapsed}>
+                Actividad
               </NavLink>
             </>
           ) : null}

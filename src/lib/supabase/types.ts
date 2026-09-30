@@ -313,6 +313,8 @@ export type CajaMovimientoRow = {
   metodo_pago: MetodoPago | null;
   venta_id: string | null;
   venta_pago_id: string | null;
+  tramitador_id: string | null;
+  tramitador_pago_id: string | null;
   created_by: string;
   created_at: string;
 };
