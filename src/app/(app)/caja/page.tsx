@@ -51,7 +51,7 @@ export default async function CajaPage({
   // de que termine el día de hoy.
   let historialQuery = supabase
     .from("caja_sesiones")
-    .select("id, opened_at, closed_at, opening_balance, closing_balance, estado")
+    .select("id, opened_at, closed_at, opening_balance, closing_balance, estado, closed_by")
     .eq("sede_id", sedeId)
     .order("opened_at", { ascending: false });
   historialQuery =
@@ -225,6 +225,9 @@ export default async function CajaPage({
                       </td>
                       <td className="py-2 pr-3 text-slate-500">
                         {s.closed_at ? formatDateTime(s.closed_at) : "—"}
+                        {s.closed_at && !s.closed_by ? (
+                          <span className="ml-1.5 text-xs text-amber-600">(automático)</span>
+                        ) : null}
                       </td>
                       <td className="py-2 pr-3">
                         <span className={badgeClass(s.estado === "abierta" ? "success" : "neutral")}>

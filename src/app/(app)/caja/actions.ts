@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getViewerContext, resolveSedeId } from "@/lib/viewer";
+import { enviarCorreoCierreCaja } from "@/lib/caja-cierre-email";
 
 export type CajaActionState = {
   error?: string;
@@ -50,7 +51,7 @@ export async function cerrarCaja(
     return { error: "Sesión de caja inválida." };
   }
 
-  const { error } = await supabase
+  const { data: sesion, error } = await supabase
     .from("caja_sesiones")
     .update({
       estado: "cerrada",
@@ -58,13 +59,34 @@ export async function cerrarCaja(
       closed_at: new Date().toISOString(),
       closing_balance: closingBalance,
     })
-    .eq("id", sesionId);
+    .eq("id", sesionId)
+    .select("sede_id, opened_at, closed_at, opening_balance")
+    .single();
 
-  if (error) {
+  if (error || !sesion) {
     return { error: "No se pudo cerrar la caja." };
   }
 
   revalidatePath("/caja");
+
+  // El correo de aviso nunca debe tumbar el cierre: si falla (Resend caído,
+  // falta la sede, lo que sea) la caja ya quedó cerrada igual.
+  try {
+    const { data: sede } = await supabase.from("sedes").select("name").eq("id", sesion.sede_id).single();
+    await enviarCorreoCierreCaja(supabase, {
+      sesionId,
+      sedeNombre: sede?.name ?? "—",
+      openedAt: sesion.opened_at,
+      closedAt: sesion.closed_at!,
+      openingBalance: sesion.opening_balance,
+      closingBalanceContado: closingBalance,
+      tipo: "manual",
+      closedByNombre: profile.full_name,
+    });
+  } catch (err) {
+    console.error("[cerrarCaja] No se pudo enviar el correo de cierre:", err);
+  }
+
   return {};
 }
 
