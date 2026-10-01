@@ -6,6 +6,7 @@ import { SedeSelect } from "@/components/sede-select";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Pagination } from "@/components/pagination";
 import { formatCOP, formatDateTime } from "@/lib/format";
+import { bogotaTodayRange } from "@/lib/bogota-date";
 import { anularVenta } from "./actions";
 import { METODO_PAGO_LABEL, type EstadoVenta } from "@/lib/supabase/types";
 import { badgeClass, buttonClass, ESTADO_VENTA_LABEL, linkClass } from "@/lib/ui";
@@ -13,13 +14,6 @@ import { badgeClass, buttonClass, ESTADO_VENTA_LABEL, linkClass } from "@/lib/ui
 export const metadata: Metadata = { title: "Ventas | Gestia App Conductores" };
 
 const PAGE_SIZE = 15;
-
-function monthRange() {
-  const now = new Date();
-  const desde = new Date(now.getFullYear(), now.getMonth(), 1);
-  const hasta = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  return { desde: desde.toISOString().slice(0, 10), hasta: hasta.toISOString().slice(0, 10) };
-}
 
 export default async function VentasPage({
   searchParams,
@@ -40,9 +34,11 @@ export default async function VentasPage({
   const { supabase, profile, sedes } = ctx;
   const sedeFilter = resolveSedeFilter(ctx, params.sede);
 
-  const defaultRange = monthRange();
-  const desde = params.desde || defaultRange.desde;
-  const hasta = params.hasta || defaultRange.hasta;
+  // Por defecto, solo las ventas de hoy (en hora de Bogotá) — si el
+  // usuario busca por fecha a mano, esos parámetros mandan.
+  const { start: hoyInicio, end: hoyFin } = bogotaTodayRange();
+  const desde = params.desde || hoyInicio.toISOString().slice(0, 10);
+  const hasta = params.hasta || hoyFin.toISOString().slice(0, 10);
 
   let query = supabase
     .from("ventas")
