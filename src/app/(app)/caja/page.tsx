@@ -41,6 +41,14 @@ export default async function CajaPage({
   // El recepcionista solo ve las cajas de hoy (para eso está: abrir,
   // registrar movimientos, cerrar e imprimir). El admin sí puede repasar
   // el historial completo de una sede para auditorías.
+  //
+  // "De hoy" se define por SOLAPAMIENTO con el día de hoy, no por
+  // opened_at nada más: una caja abierta un par de minutos antes de
+  // medianoche y cerrada ya entrada la tarde del día siguiente quedaba
+  // invisible para el recepcionista (opened_at caía "ayer"), aunque el
+  // cierre real pasó hoy. Por eso se incluye cualquier sesión que siga
+  // abierta, o que se haya cerrado hoy, siempre que haya arrancado antes
+  // de que termine el día de hoy.
   let historialQuery = supabase
     .from("caja_sesiones")
     .select("id, opened_at, closed_at, opening_balance, closing_balance, estado")
@@ -49,7 +57,9 @@ export default async function CajaPage({
   historialQuery =
     profile.role === "admin"
       ? historialQuery.limit(20)
-      : historialQuery.gte("opened_at", inicioHoy.toISOString()).lt("opened_at", finHoy.toISOString());
+      : historialQuery
+          .lt("opened_at", finHoy.toISOString())
+          .or(`closed_at.is.null,closed_at.gte.${inicioHoy.toISOString()}`);
   const { data: historial } = await historialQuery;
 
   const sesionIds = (historial ?? []).map((s) => s.id);
