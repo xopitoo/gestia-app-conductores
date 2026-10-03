@@ -32,11 +32,12 @@ export default async function MoraPage({
   const esAdmin = profile.role === "admin";
 
   // Mismo gate que el link del sidebar (ver layout.tsx): por ahora "Clientes
-  // en mora" solo está activado para admin y para la sede CEAPP CALI — un
-  // recepcionista de otra sede no debería poder entrar aunque escriba la
-  // URL a mano.
-  const sedeCaliId = sedes.find((s) => s.name === "CEAPP CALI")?.id;
-  if (!esAdmin && profile.sede_id !== sedeCaliId) {
+  // en mora" solo está activado para admin y para las sedes CEAPP
+  // CALI/JAMUNDI — un recepcionista de otra sede no debería poder entrar
+  // aunque escriba la URL a mano.
+  const SEDES_CON_MORA = ["CEAPP CALI", "CEAPP JAMUNDI"];
+  const sedesConMoraIds = sedes.filter((s) => SEDES_CON_MORA.includes(s.name)).map((s) => s.id);
+  if (!esAdmin && !sedesConMoraIds.includes(profile.sede_id ?? "")) {
     redirect("/dashboard");
   }
 

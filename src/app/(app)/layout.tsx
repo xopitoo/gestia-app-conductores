@@ -59,11 +59,12 @@ export default async function AppLayout({
     (clientesConLicencia ?? []).map((c) => ({ ...c, es_valorar: c.sede_id === sedeValorarId })),
   );
 
-  // "Clientes en mora" solo para admin y para la sede CEAPP CALI por ahora
-  // (decisión del negocio: todavía no se activó ese seguimiento en las
-  // demás sedes) — ver el mismo gate en /mora/page.tsx.
-  const sedeCaliId = sedes.find((s) => s.name === "CEAPP CALI")?.id;
-  const puedeVerMora = profile.role === "admin" || profile.sede_id === sedeCaliId;
+  // "Clientes en mora" solo para admin y para las sedes CEAPP CALI/JAMUNDI
+  // por ahora (decisión del negocio: todavía no se activó ese seguimiento
+  // en las demás sedes) — ver el mismo gate en /mora/page.tsx.
+  const SEDES_CON_MORA = ["CEAPP CALI", "CEAPP JAMUNDI"];
+  const sedesConMoraIds = sedes.filter((s) => SEDES_CON_MORA.includes(s.name)).map((s) => s.id);
+  const puedeVerMora = profile.role === "admin" || sedesConMoraIds.includes(profile.sede_id ?? "");
 
   return (
     <div className="flex min-h-svh gap-3 bg-gradient-to-br from-indigo-100 via-slate-50 to-pink-100 p-0 sm:p-3 print:block print:bg-white print:p-0">
