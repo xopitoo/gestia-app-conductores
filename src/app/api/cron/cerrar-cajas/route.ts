@@ -73,15 +73,7 @@ export async function GET(request: Request) {
     cerradas.push(sesion.id);
 
     try {
-      const { data: sede } = await supabase.from("sedes").select("name").eq("id", sesion.sede_id).single();
-      await enviarCorreoCierreCaja(supabase, {
-        sesionId: sesion.id,
-        sedeNombre: sede?.name ?? "—",
-        openedAt: sesion.opened_at,
-        closedAt,
-        openingBalance: sesion.opening_balance,
-        tipo: "automatico",
-      });
+      await enviarCorreoCierreCaja(supabase, sesion.id);
     } catch (err) {
       console.error(`[cron cerrar-cajas] No se pudo enviar el correo de la sesión ${sesion.id}:`, err);
     }

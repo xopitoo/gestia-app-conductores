@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getViewerContext } from "@/lib/viewer";
 import { formatCOP, formatDateTime } from "@/lib/format";
+import { getCierreCajaData } from "@/lib/caja-cierre-data";
 import { METODO_PAGO_LABEL, type MetodoPago } from "@/lib/supabase/types";
 import { METODO_PAGO_STYLE } from "@/lib/metodo-pago-ui";
 import { getSedeBranding } from "@/lib/sede-branding";
@@ -37,150 +38,28 @@ export default async function CierreCajaPage({
   const { id } = await params;
   const { supabase, organization } = await getViewerContext();
 
-  const { data: sesion } = await supabase
-    .from("caja_sesiones")
-    .select("id, sede_id, opened_by, opened_at, closed_by, closed_at, opening_balance, closing_balance, estado")
-    .eq("id", id)
-    .maybeSingle();
+  const cierre = await getCierreCajaData(supabase, id);
+  if (!cierre) notFound();
 
-  if (!sesion) notFound();
+  const {
+    sesion,
+    sedeNombre,
+    abiertoPorNombre,
+    cerradoPorNombre,
+    ingresos,
+    egresos,
+    totalIngresos,
+    totalEgresos,
+    ingresosEfectivo,
+    egresosEfectivo,
+    saldoTeoricoEfectivo,
+    diferencia,
+    totalesPorMetodo,
+    ventasPendientes,
+    totalVentasHoy,
+  } = cierre;
 
-  // "Hasta" del cierre: si la caja sigue abierta (se está previsualizando
-  // antes de cerrar), se usa el momento actual en vez de closed_at (null).
-  const cierreHasta = sesion.closed_at ?? new Date().toISOString();
-
-  const [{ data: sede }, { data: movimientos }, { data: perfiles }, { data: ventasPendientesRaw }, { count: ventasHoyCount }] =
-    await Promise.all([
-      supabase.from("sedes").select("name").eq("id", sesion.sede_id).maybeSingle(),
-      supabase
-        .from("caja_movimientos")
-        .select("id, tipo, concepto, monto, metodo_pago, venta_id, created_at")
-        .eq("caja_sesion_id", id)
-        .order("created_at"),
-      supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", [sesion.opened_by, sesion.closed_by].filter((v): v is string => !!v)),
-      // Ventas que se crearon durante esta sesión y siguen con saldo
-      // pendiente — ej. un tramitador trajo a alguien y todavía no pagó
-      // nada. No generan ningún caja_movimientos (no entró plata), así que
-      // sin esto quedaban invisibles en el cierre aunque hayan pasado por
-      // esta caja.
-      supabase
-        .from("ventas")
-        .select("id, cliente_id, referido_nombre, tramitador_id, monto, descuento, incremento, created_at")
-        .eq("sede_id", sesion.sede_id)
-        .eq("estado", "abonada")
-        .gte("created_at", sesion.opened_at)
-        .lte("created_at", cierreHasta)
-        .order("created_at"),
-      // Cuántas ventas se registraron durante esta sesión, sin importar su
-      // estado de pago (pagada/abonada) — para el mensaje de ánimo de
-      // cierre. Se excluyen las anuladas: una venta que se deshizo no
-      // cuenta como una venta de verdad.
-      supabase
-        .from("ventas")
-        .select("id", { count: "exact", head: true })
-        .eq("sede_id", sesion.sede_id)
-        .neq("estado", "anulada")
-        .gte("created_at", sesion.opened_at)
-        .lte("created_at", cierreHasta),
-    ]);
-
-  const ventaIds = [...new Set((movimientos ?? []).map((m) => m.venta_id).filter((v): v is string => !!v))];
-  const { data: ventas } =
-    ventaIds.length > 0
-      ? await supabase
-          .from("ventas")
-          .select("id, cliente_id, referido_nombre, tramitador_id")
-          .in("id", ventaIds)
-      : { data: [] };
-
-  const ventasPendientes = ventasPendientesRaw ?? [];
-  const pendienteVentaIds = ventasPendientes.map((v) => v.id);
-
-  const clienteIds = [
-    ...new Set([...(ventas ?? []).map((v) => v.cliente_id), ...ventasPendientes.map((v) => v.cliente_id)]),
-  ];
-  const tramitadorIds = [
-    ...new Set(
-      [...(ventas ?? []), ...ventasPendientes]
-        .map((v) => v.tramitador_id)
-        .filter((v): v is string => !!v),
-    ),
-  ];
-  const [{ data: clientes }, { data: tramitadoresRows }, { data: todosLosPagos }, { data: pagosPendientes }] =
-    await Promise.all([
-      clienteIds.length > 0
-        ? supabase.from("clientes").select("id, nombre_completo").in("id", clienteIds)
-        : Promise.resolve({ data: [] as { id: string; nombre_completo: string }[] }),
-      tramitadorIds.length > 0
-        ? supabase.from("tramitadores").select("id, nombre").in("id", tramitadorIds)
-        : Promise.resolve({ data: [] as { id: string; nombre: string }[] }),
-      // Se pide el historial COMPLETO de pagos de estas ventas (no solo los de
-      // esta caja) porque un abono de hoy puede completar una venta cuyo
-      // primer pago fue en una sesión de caja anterior — sin esto, ese primer
-      // pago de otro día jamás entraría en la comparación.
-      ventaIds.length > 0
-        ? supabase.from("venta_pagos").select("venta_id, created_at").in("venta_id", ventaIds)
-        : Promise.resolve({ data: [] as { venta_id: string; created_at: string }[] }),
-      // Lo ya abonado de las ventas pendientes, para mostrar cuánto falta
-      // (puede no ser $0 si alguien pagó una parte y no completó).
-      pendienteVentaIds.length > 0
-        ? supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", pendienteVentaIds)
-        : Promise.resolve({ data: [] as { venta_id: string; monto: number }[] }),
-    ]);
-
-  const pagadoDePendiente = (ventaId: string) =>
-    (pagosPendientes ?? []).filter((p) => p.venta_id === ventaId).reduce((acc, p) => acc + p.monto, 0);
-
-  // Primer momento en que se pagó algo de cada venta — cualquier pago
-  // posterior a ese instante es un abono, no el pago inicial.
-  const primerPagoDeVenta = new Map<string, string>();
-  for (const p of todosLosPagos ?? []) {
-    const actual = primerPagoDeVenta.get(p.venta_id);
-    if (!actual || p.created_at < actual) primerPagoDeVenta.set(p.venta_id, p.created_at);
-  }
-
-  const ventaDe = (ventaId: string | null) => (ventas ?? []).find((v) => v.id === ventaId) ?? null;
-  const clienteDe = (clienteId: string | undefined) =>
-    (clientes ?? []).find((c) => c.id === clienteId)?.nombre_completo ?? "—";
-  const referidoDe = (venta: NonNullable<ReturnType<typeof ventaDe>>) =>
-    (venta.tramitador_id
-      ? (tramitadoresRows ?? []).find((t) => t.id === venta.tramitador_id)?.nombre
-      : venta.referido_nombre) ?? "—";
-  const nombreDe = (userId: string | null) =>
-    (perfiles ?? []).find((p) => p.id === userId)?.full_name ?? "—";
-
-  const ingresos = (movimientos ?? []).filter((m) => m.tipo === "ingreso");
-  const egresos = (movimientos ?? []).filter((m) => m.tipo === "egreso");
-
-  const sum = (rows: typeof ingresos, metodo?: string) =>
-    rows
-      .filter((m) => !metodo || m.metodo_pago === metodo)
-      .reduce((acc, m) => acc + m.monto, 0);
-
-  const totalIngresos = sum(ingresos);
-  const totalEgresos = sum(egresos);
-  // El conteo físico de la caja ("Saldo de cierre contado") solo puede ser
-  // efectivo — un pago con transferencia/tarjeta nunca pasa por el cajón.
-  // Comparar contra el total de TODOS los métodos infla el teórico y hace
-  // ver una diferencia falsa; acá se aísla el efectivo para la conciliación.
-  const ingresosEfectivo = sum(ingresos, "efectivo");
-  const egresosEfectivo = sum(egresos, "efectivo");
-  const saldoTeoricoEfectivo = sesion.opening_balance + ingresosEfectivo - egresosEfectivo;
-  const diferencia = sesion.closing_balance != null ? sesion.closing_balance - saldoTeoricoEfectivo : null;
-
-  // Se guarda por la clave cruda del método (no la etiqueta) para poder
-  // buscarle su color/ícono en METODO_PAGO_STYLE al mostrarlo.
-  const totalesPorMetodo = new Map<MetodoPago, number>();
-  for (const m of ingresos) {
-    const key = (m.metodo_pago ?? "otro") as MetodoPago;
-    totalesPorMetodo.set(key, (totalesPorMetodo.get(key) ?? 0) + m.monto);
-  }
-
-  const branding = getSedeBranding(sede?.name, organization.name);
-  const totalVentasHoy = ventasHoyCount ?? 0;
+  const branding = getSedeBranding(sedeNombre, organization.name);
   const tramoCierre = tramoCierreDe(totalVentasHoy);
 
   return (
@@ -224,14 +103,16 @@ export default async function CierreCajaPage({
           <div>
             <p className="text-slate-400">Apertura</p>
             <p className="font-medium text-slate-800">{formatDateTime(sesion.opened_at)}</p>
-            <p className="text-slate-500">{nombreDe(sesion.opened_by)}</p>
+            <p className="text-slate-500">{abiertoPorNombre}</p>
           </div>
           <div>
             <p className="text-slate-400">Cierre</p>
             <p className="font-medium text-slate-800">
               {sesion.closed_at ? formatDateTime(sesion.closed_at) : "—"}
             </p>
-            <p className="text-slate-500">{nombreDe(sesion.closed_by)}</p>
+            <p className="text-slate-500">
+              {!sesion.closed_at ? "" : sesion.closed_by ? cerradoPorNombre : "Automático"}
+            </p>
           </div>
         </div>
 
@@ -265,7 +146,7 @@ export default async function CierreCajaPage({
         <div className="mt-4">
           <p className="mb-2 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Formas de pago</p>
           <div className="flex flex-wrap items-stretch gap-2 border-b border-slate-200 pb-3">
-            {[...totalesPorMetodo.entries()].map(([metodo, monto]) => {
+            {totalesPorMetodo.map(({ metodo, monto }) => {
               const style = METODO_PAGO_STYLE[metodo] ?? METODO_PAGO_STYLE.otro;
               const Icon = style.icon;
               return (
@@ -309,40 +190,32 @@ export default async function CierreCajaPage({
               </tr>
             </thead>
             <tbody>
-              {ingresos.map((m) => {
-                const venta = ventaDe(m.venta_id);
-                // El pago inicial de una venta es el que coincide con el
-                // primer momento en que se le pagó algo — cualquier otro
-                // pago posterior de esa misma venta es un abono (típico de
-                // alguien completando lo que debe para certificarse).
-                const esAbono = m.venta_id != null && primerPagoDeVenta.get(m.venta_id) !== m.created_at;
-                return (
-                  <tr key={m.id} className="border-b border-slate-100">
-                    <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">
-                      {formatDateTime(m.created_at).split(", ")[1] ?? formatDateTime(m.created_at)}
-                    </td>
-                    <td className="py-1.5 pr-2 font-medium text-slate-800 italic">
-                      {venta ? clienteDe(venta.cliente_id) : m.concepto}
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      {venta ? (
-                        <span className={badgeClass(esAbono ? "warning" : "info")}>
-                          {esAbono ? "Abono" : "Pago inicial"}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="py-1.5 pr-2 text-slate-500">{venta ? referidoDe(venta) : "—"}</td>
-                    <td className="py-1.5 pr-2">
-                      <MetodoBadge metodo={m.metodo_pago} />
-                    </td>
-                    <td className="py-1.5 pl-2 text-right font-medium text-emerald-600">
-                      {formatCOP(m.monto)}
-                    </td>
-                  </tr>
-                );
-              })}
+              {ingresos.map((m) => (
+                <tr key={m.id} className="border-b border-slate-100">
+                  <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">
+                    {formatDateTime(m.created_at).split(", ")[1] ?? formatDateTime(m.created_at)}
+                  </td>
+                  <td className="py-1.5 pr-2 font-medium text-slate-800 italic">
+                    {m.clienteNombre ?? m.concepto}
+                  </td>
+                  <td className="py-1.5 pr-2">
+                    {m.clienteNombre ? (
+                      <span className={badgeClass(m.esAbono ? "warning" : "info")}>
+                        {m.esAbono ? "Abono" : "Pago inicial"}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-2 text-slate-500">{m.referido ?? "—"}</td>
+                  <td className="py-1.5 pr-2">
+                    <MetodoBadge metodo={m.metodo_pago} />
+                  </td>
+                  <td className="py-1.5 pl-2 text-right font-medium text-emerald-600">
+                    {formatCOP(m.monto)}
+                  </td>
+                </tr>
+              ))}
               {ingresos.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-4 text-center text-slate-400">
@@ -385,42 +258,27 @@ export default async function CierreCajaPage({
                 </tr>
               </thead>
               <tbody>
-                {ventasPendientes.map((v) => {
-                  const pagado = pagadoDePendiente(v.id);
-                  const pendiente = v.monto - v.descuento + v.incremento - pagado;
-                  return (
-                    <tr key={v.id} className="border-b border-slate-100">
-                      <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">
-                        {formatDateTime(v.created_at).split(", ")[1] ?? formatDateTime(v.created_at)}
-                      </td>
-                      <td className="py-1.5 pr-2 font-medium text-slate-800 italic">
-                        {clienteDe(v.cliente_id)}
-                      </td>
-                      <td className="py-1.5 pr-2 text-slate-500">{referidoDe(v)}</td>
-                      <td className="py-1.5 pr-2 text-right text-slate-600">
-                        {formatCOP(v.monto - v.descuento + v.incremento)}
-                      </td>
-                      <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(pagado)}</td>
-                      <td className="py-1.5 pl-2 text-right font-semibold text-amber-700">
-                        {formatCOP(pendiente)}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {ventasPendientes.map((v) => (
+                  <tr key={v.id} className="border-b border-slate-100">
+                    <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">
+                      {formatDateTime(v.created_at).split(", ")[1] ?? formatDateTime(v.created_at)}
+                    </td>
+                    <td className="py-1.5 pr-2 font-medium text-slate-800 italic">{v.clienteNombre}</td>
+                    <td className="py-1.5 pr-2 text-slate-500">{v.referido}</td>
+                    <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(v.total)}</td>
+                    <td className="py-1.5 pr-2 text-right text-slate-600">{formatCOP(v.pagado)}</td>
+                    <td className="py-1.5 pl-2 text-right font-semibold text-amber-700">
+                      {formatCOP(v.pendiente)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-slate-800 font-semibold text-slate-900">
                   <td colSpan={5} className="py-1.5 pr-2 text-right">
                     Total pendiente
                   </td>
-                  <td className="py-1.5 pl-2 text-right text-amber-700">
-                    {formatCOP(
-                      ventasPendientes.reduce(
-                        (acc, v) => acc + (v.monto - v.descuento + v.incremento - pagadoDePendiente(v.id)),
-                        0,
-                      ),
-                    )}
-                  </td>
+                  <td className="py-1.5 pl-2 text-right text-amber-700">{formatCOP(cierre.totalPendiente)}</td>
                 </tr>
               </tfoot>
             </table>
