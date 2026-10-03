@@ -59,10 +59,11 @@ export default async function AppLayout({
     (clientesConLicencia ?? []).map((c) => ({ ...c, es_valorar: c.sede_id === sedeValorarId })),
   );
 
-  // "Clientes en mora" solo para admin y para las sedes CEAPP CALI/JAMUNDI
-  // por ahora (decisión del negocio: todavía no se activó ese seguimiento
-  // en las demás sedes) — ver el mismo gate en /mora/page.tsx.
-  const SEDES_CON_MORA = ["CEAPP CALI", "CEAPP JAMUNDI"];
+  // "Clientes en mora" solo para admin y para las sedes CEAPP
+  // CALI/JAMUNDI/SANTANDER por ahora (decisión del negocio: todavía no se
+  // activó ese seguimiento en las demás sedes) — ver el mismo gate en
+  // /mora/page.tsx.
+  const SEDES_CON_MORA = ["CEAPP CALI", "CEAPP JAMUNDI", "CEAPP SANTANDER"];
   const sedesConMoraIds = sedes.filter((s) => SEDES_CON_MORA.includes(s.name)).map((s) => s.id);
   const puedeVerMora = profile.role === "admin" || sedesConMoraIds.includes(profile.sede_id ?? "");
 
