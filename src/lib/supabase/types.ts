@@ -438,6 +438,15 @@ export type Database = {
         },
         VentaRow
       >;
+      agregar_item_venta: FunctionDef<
+        {
+          p_venta_id: string;
+          p_producto_id: string | null;
+          p_nombre: string;
+          p_precio: number;
+        },
+        VentaRow
+      >;
       registrar_certificado_runt: FunctionDef<
         { p_venta_id: string; p_certificado_path: string },
         VentaRow

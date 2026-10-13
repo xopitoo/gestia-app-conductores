@@ -7,6 +7,7 @@ import { SedeSelect } from "@/components/sede-select";
 import { formatCOP } from "@/lib/format";
 import { buttonClass, linkClass } from "@/lib/ui";
 import { DescuentoForm } from "./descuento-form";
+import { AgregarItemForm } from "./agregar-item-form";
 
 export const metadata: Metadata = { title: "Clientes en mora | Gestia App Conductores" };
 
@@ -57,7 +58,7 @@ export default async function MoraPage({
   const ventaIds = (ventas ?? []).map((v) => v.id);
   const clienteIds = [...new Set((ventas ?? []).map((v) => v.cliente_id))];
 
-  const [{ data: pagosRows }, { data: clientesRows }] = await Promise.all([
+  const [{ data: pagosRows }, { data: clientesRows }, { data: productosRows }] = await Promise.all([
     ventaIds.length
       ? supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", ventaIds)
       : Promise.resolve({ data: [] as { venta_id: string; monto: number }[] }),
@@ -67,12 +68,24 @@ export default async function MoraPage({
           .select("id, nombre_completo, numero_documento, tipo_documento, telefono, telefono_pais")
           .in("id", clienteIds)
       : Promise.resolve({ data: [] as { id: string; nombre_completo: string; numero_documento: string; tipo_documento: string; telefono: string | null; telefono_pais: string }[] }),
+    // Solo para armar el desplegable de "Anexar producto" (ver más abajo) —
+    // admin puede ver filas de varias sedes a la vez acá, así que se traen
+    // todos los catálogos activos y se filtra por sede fila por fila.
+    esAdmin
+      ? supabase.from("productos").select("id, sede_id, nombre, precio").eq("active", true)
+      : Promise.resolve({ data: [] as { id: string; sede_id: string | null; nombre: string; precio: number }[] }),
   ]);
 
   const pagadoDeVenta = (id: string) =>
     (pagosRows ?? []).filter((p) => p.venta_id === id).reduce((acc, p) => acc + p.monto, 0);
   const sedeName = (id: string) => sedes.find((s) => s.id === id)?.name ?? "—";
   const clienteInfo = (id: string) => clientesRows?.find((c) => c.id === id);
+  // Mismo criterio que la pantalla de "Nueva venta": si la sede tiene su
+  // propio catálogo, no se mezcla con los productos "de todas las sedes".
+  const productosDeSede = (sedeId: string) => {
+    const propios = (productosRows ?? []).filter((p) => p.sede_id === sedeId);
+    return propios.length > 0 ? propios : (productosRows ?? []).filter((p) => p.sede_id === null);
+  };
 
   const porCliente = new Map<string, { clienteId: string; filas: Fila[]; totalSaldo: number }>();
   for (const v of ventas ?? []) {
@@ -198,13 +211,16 @@ export default async function MoraPage({
                         </span>
                       </div>
                       {esAdmin ? (
-                        <DescuentoForm
-                          ventaId={f.ventaId}
-                          montoBruto={f.monto}
-                          incremento={f.incremento}
-                          pagado={f.pagado}
-                          descuentoActual={f.descuento}
-                        />
+                        <div className="flex flex-col items-end gap-1">
+                          <DescuentoForm
+                            ventaId={f.ventaId}
+                            montoBruto={f.monto}
+                            incremento={f.incremento}
+                            pagado={f.pagado}
+                            descuentoActual={f.descuento}
+                          />
+                          <AgregarItemForm ventaId={f.ventaId} productos={productosDeSede(f.sedeId)} />
+                        </div>
                       ) : (
                         <Link href={`/ventas/${f.ventaId}`} className={linkClass("primary")}>
                           Ver venta / Registrar pago
