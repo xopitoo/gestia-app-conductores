@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getViewerContext } from "@/lib/viewer";
+import { CotizadorRapido } from "./cotizador-rapido";
 import { SoatTabla } from "./soat-tabla";
 
 export const metadata: Metadata = { title: "Precios SOAT | Gestia App Conductores" };
@@ -26,7 +27,17 @@ export default async function SoatPage() {
           Todavía no hay tarifas de SOAT cargadas.
         </div>
       ) : (
-        <SoatTabla tarifas={tarifas} esAdmin={esAdmin} />
+        <>
+          <CotizadorRapido tarifas={tarifas} />
+          <details className="group rounded-2xl [&_summary::-webkit-details-marker]:hidden">
+            <summary className="cursor-pointer list-none text-sm font-medium text-slate-500 hover:text-slate-700">
+              Ver tabla completa
+            </summary>
+            <div className="mt-3">
+              <SoatTabla tarifas={tarifas} esAdmin={esAdmin} />
+            </div>
+          </details>
+        </>
       )}
     </div>
   );

@@ -224,6 +224,22 @@ create trigger soat_tarifas_set_updated_at
   before update on public.soat_tarifas
   for each row execute function public.set_updated_at();
 
+-- CURSO_INFRACTORES_CONFIG: una fila por organización con el % del valor de
+-- la multa (ya con descuento) que la organización cobra por el curso de
+-- infractores — el resto lo paga el cliente directo en el SIMIT. Los
+-- plazos de 5/11/20/26 días para cada tramo de descuento están fijados por
+-- ley y van hardcodeados en src/lib/curso-infractores.ts, no acá.
+create table if not exists public.curso_infractores_config (
+  organization_id uuid primary key references public.organizations (id) on delete cascade,
+  porcentaje_curso numeric(5, 4) not null default 0.25 check (porcentaje_curso >= 0 and porcentaje_curso <= 1),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists curso_infractores_config_set_updated_at on public.curso_infractores_config;
+create trigger curso_infractores_config_set_updated_at
+  before update on public.curso_infractores_config
+  for each row execute function public.set_updated_at();
+
 -- =========================================================
 -- TRAMITADORES (asesores externos que revenden el servicio — cobran lo que
 -- quieren al cliente final, pero le deben a la organización un "precio
@@ -2845,6 +2861,20 @@ create policy "soat_tarifas_insert_admin" on public.soat_tarifas
 
 drop policy if exists "soat_tarifas_update_admin" on public.soat_tarifas;
 create policy "soat_tarifas_update_admin" on public.soat_tarifas
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- curso_infractores_config: select org-wide (cualquiera usa la calculadora),
+-- solo admin edita el % que se cobra por el curso.
+alter table public.curso_infractores_config enable row level security;
+
+drop policy if exists "curso_infractores_config_select_org" on public.curso_infractores_config;
+create policy "curso_infractores_config_select_org" on public.curso_infractores_config
+  for select using (organization_id = public.current_org_id());
+
+drop policy if exists "curso_infractores_config_update_admin" on public.curso_infractores_config;
+create policy "curso_infractores_config_update_admin" on public.curso_infractores_config
   for update
   using (public.current_role() = 'admin' and organization_id = public.current_org_id())
   with check (public.current_role() = 'admin' and organization_id = public.current_org_id());

@@ -214,6 +214,13 @@ export type SoatTarifaRow = {
   updated_at: string;
 };
 
+export type CursoInfractoresConfigRow = {
+  organization_id: string;
+  /** Fracción decimal (0.25 = 25%) del monto ya con descuento que cobra la organización por el curso. */
+  porcentaje_curso: number;
+  updated_at: string;
+};
+
 export type VentaRow = {
   id: string;
   organization_id: string;
@@ -374,6 +381,7 @@ export type Database = {
       productos: TableDef<ProductoRow>;
       financiadoras: TableDef<FinanciadoraRow>;
       soat_tarifas: TableDef<SoatTarifaRow>;
+      curso_infractores_config: TableDef<CursoInfractoresConfigRow>;
       tramitadores: TableDef<TramitadorRow>;
       tramitador_pagos: TableDef<TramitadorPagoRow>;
       tramitador_precios: TableDef<TramitadorPrecioRow>;

@@ -20,6 +20,7 @@ import {
   Package,
   ShieldCheck,
   ShoppingBag,
+  Siren,
   UserCog,
   Users,
   X,
@@ -139,6 +140,9 @@ export function Sidebar({
           </NavLink>
           <NavLink href="/soat" icon={<Car className="h-4.5 w-4.5" />} collapsed={collapsed}>
             Precios SOAT
+          </NavLink>
+          <NavLink href="/curso-infractores" icon={<Siren className="h-4.5 w-4.5" />} collapsed={collapsed}>
+            Curso de infractores
           </NavLink>
           {showMora ? (
             <NavLink href="/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
