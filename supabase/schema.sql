@@ -195,6 +195,35 @@ create trigger financiadoras_set_updated_at
   before update on public.financiadoras
   for each row execute function public.set_updated_at();
 
+-- SOAT_TARIFAS: tarifario oficial del SOAT (precio por tipo/rango de
+-- vehículo) para la página /soat — consulta rápida de precios, sin
+-- integración con ninguna aseguradora. Prima/contribución/tasa_runt/total
+-- se guardan tal cual las publica la aseguradora (no se recalculan con
+-- fórmula, el redondeo oficial no es un porcentaje limpio) y se editan a
+-- mano desde el panel de admin cada vez que cambia el tarifario.
+create table if not exists public.soat_tarifas (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  codigo text not null,
+  categoria text not null,
+  descripcion text not null,
+  prima numeric(12, 0) not null default 0 check (prima >= 0),
+  contribucion numeric(12, 0) not null default 0 check (contribucion >= 0),
+  tasa_runt numeric(12, 0) not null default 0 check (tasa_runt >= 0),
+  total numeric(12, 0) not null default 0 check (total >= 0),
+  anio integer not null default 2026,
+  orden integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists soat_tarifas_org_codigo_idx on public.soat_tarifas (organization_id, codigo);
+create index if not exists soat_tarifas_organization_id_idx on public.soat_tarifas (organization_id);
+
+drop trigger if exists soat_tarifas_set_updated_at on public.soat_tarifas;
+create trigger soat_tarifas_set_updated_at
+  before update on public.soat_tarifas
+  for each row execute function public.set_updated_at();
+
 -- =========================================================
 -- TRAMITADORES (asesores externos que revenden el servicio — cobran lo que
 -- quieren al cliente final, pero le deben a la organización un "precio
@@ -2798,6 +2827,24 @@ create policy "financiadoras_insert_admin" on public.financiadoras
 
 drop policy if exists "financiadoras_update_admin" on public.financiadoras;
 create policy "financiadoras_update_admin" on public.financiadoras
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- soat_tarifas: select org-wide (cualquiera consulta precios), solo admin
+-- edita el tarifario.
+alter table public.soat_tarifas enable row level security;
+
+drop policy if exists "soat_tarifas_select_org" on public.soat_tarifas;
+create policy "soat_tarifas_select_org" on public.soat_tarifas
+  for select using (organization_id = public.current_org_id());
+
+drop policy if exists "soat_tarifas_insert_admin" on public.soat_tarifas;
+create policy "soat_tarifas_insert_admin" on public.soat_tarifas
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "soat_tarifas_update_admin" on public.soat_tarifas;
+create policy "soat_tarifas_update_admin" on public.soat_tarifas
   for update
   using (public.current_role() = 'admin' and organization_id = public.current_org_id())
   with check (public.current_role() = 'admin' and organization_id = public.current_org_id());

@@ -198,6 +198,22 @@ export type FinanciadoraRow = {
   updated_at: string;
 };
 
+export type SoatTarifaRow = {
+  id: string;
+  organization_id: string;
+  codigo: string;
+  categoria: string;
+  descripcion: string;
+  prima: number;
+  contribucion: number;
+  tasa_runt: number;
+  total: number;
+  anio: number;
+  orden: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type VentaRow = {
   id: string;
   organization_id: string;
@@ -357,6 +373,7 @@ export type Database = {
       clientes: TableDef<ClienteRow>;
       productos: TableDef<ProductoRow>;
       financiadoras: TableDef<FinanciadoraRow>;
+      soat_tarifas: TableDef<SoatTarifaRow>;
       tramitadores: TableDef<TramitadorRow>;
       tramitador_pagos: TableDef<TramitadorPagoRow>;
       tramitador_precios: TableDef<TramitadorPrecioRow>;

@@ -8,6 +8,7 @@ import {
   Banknote,
   Building2,
   Calculator,
+  Car,
   ChevronsLeft,
   ChevronsRight,
   GraduationCap,
@@ -135,6 +136,9 @@ export function Sidebar({
           </NavLink>
           <NavLink href="/simulador-credito" icon={<Calculator className="h-4.5 w-4.5" />} collapsed={collapsed}>
             Simulador de crédito
+          </NavLink>
+          <NavLink href="/soat" icon={<Car className="h-4.5 w-4.5" />} collapsed={collapsed}>
+            Precios SOAT
           </NavLink>
           {showMora ? (
             <NavLink href="/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>
