@@ -4,46 +4,15 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ShieldCheck } from "lucide-react";
 import { formatCOP } from "@/lib/format";
 import { buttonClass, linkClass } from "@/lib/ui";
+import { agruparSoatPorFamilia, familiaDeSoat, type AnioSoat } from "@/lib/soat";
 import type { SoatTarifaRow } from "@/lib/supabase/types";
-
-type Anio = "0-9" | "10+";
-
-/**
- * Las categorías vienen de la BD como "Autos Familiares 0 - 9 años" / "...
- * 10 años o más" — se separa acá la "familia" (tipo de vehículo, lo primero
- * que elige el recepcionista) de la antigüedad (lo segundo, solo si esa
- * familia la distingue) para armar el flujo guiado sin tocar el esquema.
- */
-function familiaDe(categoria: string): { familia: string; anio: Anio | null } {
-  const m0a9 = /\s*0\s*-\s*9\s*años$/i;
-  const m10 = /\s*10\s*años?\s*o\s*m[aá]s$/i;
-  if (m0a9.test(categoria)) return { familia: categoria.replace(m0a9, "").trim(), anio: "0-9" };
-  if (m10.test(categoria)) return { familia: categoria.replace(m10, "").trim(), anio: "10+" };
-  return { familia: categoria, anio: null };
-}
 
 export function CotizadorRapido({ tarifas }: { tarifas: SoatTarifaRow[] }) {
   const [familia, setFamilia] = useState<string | null>(null);
-  const [anio, setAnio] = useState<Anio | null>(null);
+  const [anio, setAnio] = useState<AnioSoat | null>(null);
   const [tarifaId, setTarifaId] = useState<string | null>(null);
 
-  const familias = useMemo(() => {
-    const orden: string[] = [];
-    const porFamilia = new Map<string, SoatTarifaRow[]>();
-    for (const t of tarifas) {
-      const { familia: f } = familiaDe(t.categoria);
-      if (!porFamilia.has(f)) {
-        porFamilia.set(f, []);
-        orden.push(f);
-      }
-      porFamilia.get(f)!.push(t);
-    }
-    return orden.map((nombre) => {
-      const filas = porFamilia.get(nombre)!;
-      const tieneAnio = filas.some((t) => familiaDe(t.categoria).anio !== null);
-      return { nombre, filas, tieneAnio };
-    });
-  }, [tarifas]);
+  const familias = useMemo(() => agruparSoatPorFamilia(tarifas), [tarifas]);
 
   const familiaActual = familias.find((f) => f.nombre === familia) ?? null;
 
@@ -51,7 +20,7 @@ export function CotizadorRapido({ tarifas }: { tarifas: SoatTarifaRow[] }) {
     if (!familiaActual) return [];
     if (!familiaActual.tieneAnio) return familiaActual.filas;
     if (!anio) return [];
-    return familiaActual.filas.filter((t) => familiaDe(t.categoria).anio === anio);
+    return familiaActual.filas.filter((t) => familiaDeSoat(t.categoria).anio === anio);
   }, [familiaActual, anio]);
 
   const tarifaElegida = tarifas.find((t) => t.id === tarifaId) ?? null;

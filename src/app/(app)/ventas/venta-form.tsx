@@ -4,6 +4,7 @@ import { useActionState, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, HandCoins, Plus, X } from "lucide-react";
 import { registrarVenta } from "./actions";
 import { PagoLines } from "./pago-lines";
+import { SoatPicker } from "./soat-picker";
 import { DescuentoPicker } from "@/components/descuento-picker";
 import { IncrementoPicker } from "@/components/incremento-picker";
 import { RuntConsultaLink } from "@/components/runt-link";
@@ -185,7 +186,7 @@ export function VentaForm({
   const [clienteId, setClienteId] = useState(clienteIdInicial ?? "");
   const [items, setItems] = useState<VentaItemInput[]>([]);
   const [q, setQ] = useState("");
-  const [listaProductosAbierta, setListaProductosAbierta] = useState<"normal" | "tramitador">("normal");
+  const [listaProductosAbierta, setListaProductosAbierta] = useState<"normal" | "tramitador" | "soat">("normal");
   const [descuentoTipo, setDescuentoTipo] = useState<DescuentoTipo | "">("");
   const [descuentoValor, setDescuentoValor] = useState(0);
   const [incrementoTipo, setIncrementoTipo] = useState<DescuentoTipo | "">("");
@@ -288,6 +289,17 @@ export function VentaForm({
     const next = [...items, { producto_id: p.id, nombre: `${p.nombre} (tramitador)`, precio: precioEspecial }];
     setItems(next);
     setPrecioTramitador(precioSugerido(tramitadorId, next));
+    sumarCategoriasDetectadas(next);
+  }
+
+  // El precio de un SOAT depende del tipo/antigüedad/cilindraje del vehículo
+  // (37 combinaciones distintas, ver /soat) — no tiene sentido como producto
+  // de precio fijo en el catálogo, así que se agrega directo con el monto
+  // que ya se consultó por fuera (ver SoatPicker).
+  function agregarSoat(nombre: string, precio: number) {
+    const next = [...items, { producto_id: null, nombre, precio }];
+    setItems(next);
+    if (tramitadorId) setPrecioTramitador(precioSugerido(tramitadorId, next));
     sumarCategoriasDetectadas(next);
   }
 
@@ -449,6 +461,22 @@ export function VentaForm({
             </div>
           </details>
         ) : null}
+
+        <details
+          open={listaProductosAbierta === "soat"}
+          onToggle={(e) => {
+            if (e.currentTarget.open) setListaProductosAbierta("soat");
+          }}
+          className="group rounded-lg border border-amber-200 bg-amber-50/40 [&_summary::-webkit-details-marker]:hidden"
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2">
+            <span className="text-sm font-medium text-amber-900">SOAT</span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-amber-500 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="border-t border-amber-200 p-2">
+            <SoatPicker onAgregar={agregarSoat} />
+          </div>
+        </details>
       </section>
 
       <section className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
