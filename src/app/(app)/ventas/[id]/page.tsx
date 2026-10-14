@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText, GraduationCap, Paperclip, Printer } from "lucide-react";
+import { ArrowLeft, FileText, GraduationCap, HandCoins, Paperclip, Printer } from "lucide-react";
 import { getViewerContext } from "@/lib/viewer";
 import { getTramitadorSaldo } from "@/lib/tramitador-saldo";
 import { formatCOP, formatDateTime } from "@/lib/format";
@@ -147,7 +147,13 @@ export default async function VentaDetailPage({
               {cliente?.tipo_documento} {cliente?.numero_documento} · {formatDateTime(venta.created_at)}
             </p>
             {tramitador ? (
-              <div className="mt-1 text-xs text-indigo-600">
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-indigo-600">
+                {venta.monto_cobrado_tramitador !== null ? (
+                  <span className={`inline-flex items-center gap-1 ${badgeClass("warning")}`}>
+                    <HandCoins className="h-3 w-3" aria-hidden="true" />
+                    Cobro aparte: {formatCOP(venta.monto_cobrado_tramitador)}
+                  </span>
+                ) : null}
                 <p>
                   Tramitador: {tramitador.nombre} — precio especial {formatCOP(venta.precio_tramitador)}, ganancia
                   del tramitador {formatCOP(gananciaTramitador)} sobre {formatCOP(montoReferidoNeto)} (

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { GraduationCap, Handshake, Plus, UserPlus } from "lucide-react";
+import { GraduationCap, HandCoins, Handshake, Plus, UserPlus } from "lucide-react";
 import { getViewerContext, requireOpenCaja, resolveSedeFilter } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
@@ -43,7 +43,7 @@ export default async function VentasPage({
   let query = supabase
     .from("ventas")
     .select(
-      "id, sede_id, cliente_id, tramitador_id, concepto, monto, descuento, incremento, estado, vendedor_id, certificado, categorias_licencia, created_at",
+      "id, sede_id, cliente_id, tramitador_id, concepto, monto, descuento, incremento, estado, vendedor_id, certificado, categorias_licencia, created_at, monto_cobrado_tramitador",
     )
     .gte("created_at", desde)
     .lt("created_at", hasta)
@@ -220,9 +220,17 @@ export default async function VentasPage({
                   <td className="px-4 py-3 text-slate-600">
                     {v.concepto}
                     {tramitadorNombre(v.tramitador_id) ? (
-                      <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-violet-600">
-                        <Handshake className="h-3 w-3 shrink-0" aria-hidden="true" />
-                        {tramitadorNombre(v.tramitador_id)}
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-violet-600">
+                        <span className="flex items-center gap-1">
+                          <Handshake className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {tramitadorNombre(v.tramitador_id)}
+                        </span>
+                        {v.monto_cobrado_tramitador !== null ? (
+                          <span className={`inline-flex items-center gap-1 ${badgeClass("warning")}`}>
+                            <HandCoins className="h-3 w-3" aria-hidden="true" />
+                            Cobro aparte
+                          </span>
+                        ) : null}
                       </p>
                     ) : null}
                   </td>
