@@ -177,6 +177,11 @@ create table if not exists public.financiadoras (
   tasa_mensual numeric(8, 6) not null default 0 check (tasa_mensual >= 0),
   tasa_seguro numeric(8, 6) not null default 0 check (tasa_seguro >= 0),
   plazo_max integer not null default 60 check (plazo_max > 0),
+  -- Tabla de factores real (cuota/monto por cantidad de cuotas), para
+  -- financiadoras cuyo costo público no se explica con una tasa de interés
+  -- limpia (ej. Sistecrédito). Si está presente reemplaza el cálculo por
+  -- tasa_mensual/tasa_seguro — ver src/lib/simulador-credito.ts.
+  tabla_factores jsonb,
   active boolean not null default true,
   created_by uuid references public.profiles (id),
   created_at timestamptz not null default now(),

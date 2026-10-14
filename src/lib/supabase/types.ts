@@ -190,6 +190,8 @@ export type FinanciadoraRow = {
   /** Fracción decimal sobre el monto original, prorrateada linealmente a lo largo del plazo. */
   tasa_seguro: number;
   plazo_max: number;
+  /** Tabla de factores real (cuota/monto por cantidad de cuotas), tomada del simulador público. Si está presente, reemplaza el cálculo por tasa_mensual/tasa_seguro. */
+  tabla_factores: number[] | null;
   active: boolean;
   created_by: string | null;
   created_at: string;
