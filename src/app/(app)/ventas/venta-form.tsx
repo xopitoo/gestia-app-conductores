@@ -4,7 +4,6 @@ import { useActionState, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, HandCoins, Plus, X } from "lucide-react";
 import { registrarVenta } from "./actions";
 import { PagoLines } from "./pago-lines";
-import { SoatPicker } from "./soat-picker";
 import { DescuentoPicker } from "@/components/descuento-picker";
 import { IncrementoPicker } from "@/components/incremento-picker";
 import { RuntConsultaLink } from "@/components/runt-link";
@@ -186,7 +185,7 @@ export function VentaForm({
   const [clienteId, setClienteId] = useState(clienteIdInicial ?? "");
   const [items, setItems] = useState<VentaItemInput[]>([]);
   const [q, setQ] = useState("");
-  const [listaProductosAbierta, setListaProductosAbierta] = useState<"normal" | "tramitador" | "soat">("normal");
+  const [listaProductosAbierta, setListaProductosAbierta] = useState<"normal" | "tramitador">("normal");
   const [descuentoTipo, setDescuentoTipo] = useState<DescuentoTipo | "">("");
   const [descuentoValor, setDescuentoValor] = useState(0);
   const [incrementoTipo, setIncrementoTipo] = useState<DescuentoTipo | "">("");
@@ -294,13 +293,25 @@ export function VentaForm({
 
   // El precio de un SOAT depende del tipo/antigüedad/cilindraje del vehículo
   // (37 combinaciones distintas, ver /soat) — no tiene sentido como producto
-  // de precio fijo en el catálogo, así que se agrega directo con el monto
-  // que ya se consultó por fuera (ver SoatPicker).
-  function agregarSoat(nombre: string, precio: number) {
-    const next = [...items, { producto_id: null, nombre, precio }];
+  // de precio fijo en el catálogo. Se agrega un ítem en $0 y recién ahí se
+  // habilita su precio para escribirlo a mano en el carrito (ver más abajo)
+  // — a propósito no es un campo suelto siempre visible, para que no se
+  // use por error sin haber agregado el ítem.
+  function agregarSoat() {
+    const next = [...items, { producto_id: null, nombre: "SOAT", precio: 0 }];
     setItems(next);
     if (tramitadorId) setPrecioTramitador(precioSugerido(tramitadorId, next));
     sumarCategoriasDetectadas(next);
+  }
+
+  function esItemSoat(item: VentaItemInput) {
+    return item.producto_id === null && item.nombre === "SOAT";
+  }
+
+  function actualizarPrecioItem(index: number, precio: number) {
+    const next = items.map((item, i) => (i === index ? { ...item, precio } : item));
+    setItems(next);
+    if (tramitadorId) setPrecioTramitador(precioSugerido(tramitadorId, next));
   }
 
   function quitarItem(index: number) {
@@ -462,21 +473,14 @@ export function VentaForm({
           </details>
         ) : null}
 
-        <details
-          open={listaProductosAbierta === "soat"}
-          onToggle={(e) => {
-            if (e.currentTarget.open) setListaProductosAbierta("soat");
-          }}
-          className="group rounded-lg border border-amber-200 bg-amber-50/40 [&_summary::-webkit-details-marker]:hidden"
+        <button
+          type="button"
+          onClick={agregarSoat}
+          className="flex items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50/40 px-3 py-2 text-left text-sm transition hover:border-amber-400 hover:bg-amber-50"
         >
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2">
-            <span className="text-sm font-medium text-amber-900">SOAT</span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-amber-500 transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="border-t border-amber-200 p-2">
-            <SoatPicker onAgregar={agregarSoat} />
-          </div>
-        </details>
+          <span className="font-medium text-amber-900">SOAT (valor variable)</span>
+          <Plus className="h-4 w-4 shrink-0 text-amber-600" />
+        </button>
       </section>
 
       <section className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
@@ -493,7 +497,20 @@ export function VentaForm({
               <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
                 <span className="truncate text-slate-700">{item.nombre}</span>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="font-medium text-slate-800">{formatCOP(item.precio)}</span>
+                  {esItemSoat(item) ? (
+                    <input
+                      type="number"
+                      min={0}
+                      step="100"
+                      autoFocus
+                      value={item.precio || ""}
+                      onChange={(e) => actualizarPrecioItem(i, Math.max(0, Number(e.target.value) || 0))}
+                      placeholder="Valor del SOAT"
+                      className="w-32 rounded-md border border-amber-300 px-2 py-1 text-sm text-slate-900 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                    />
+                  ) : (
+                    <span className="font-medium text-slate-800">{formatCOP(item.precio)}</span>
+                  )}
                   <button
                     type="button"
                     onClick={() => quitarItem(i)}
@@ -751,9 +768,16 @@ export function VentaForm({
         </p>
       ) : null}
 
+      {items.some((item) => esItemSoat(item) && item.precio === 0) ? (
+        <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          Falta el valor del SOAT.
+        </p>
+      ) : null}
+
       <button
         type="submit"
-        disabled={pending || items.length === 0}
+        disabled={pending || items.length === 0 || items.some((item) => esItemSoat(item) && item.precio === 0)}
         className={`mt-1 ${buttonClass("primary")} w-full`}
       >
         {pending ? "Registrando..." : `Registrar orden — ${formatCOP(totalNeto)}`}
