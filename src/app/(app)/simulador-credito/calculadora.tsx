@@ -20,39 +20,39 @@ type Tema = {
 
 /**
  * Un color de marca por financiadora, para que el simulador se "sienta"
- * distinto según cuál esté eligiendo el recepcionista — mismo patrón de
- * colores que usa cada una en su propia marca (Brilla=teal, Addi=morado,
- * Sistecrédito=verde lima). Cualquier financiadora nueva que no esté acá
- * (ej. una que agregue un admin después) cae en el tema por defecto
- * (índigo, el color primario del resto de la app).
+ * distinto según cuál esté eligiendo el recepcionista (Brilla=rojo,
+ * Addi=azul clarito, Sistecrédito=verde, a pedido del admin). Cualquier
+ * financiadora nueva que no esté acá (ej. una que agregue un admin después)
+ * cae en el tema por defecto (índigo, el color primario del resto de la
+ * app).
  */
 const TEMAS: Record<string, Tema> = {
   brilla: {
-    tabActiva: "border-teal-600 bg-teal-50 text-teal-700",
-    punto: "bg-teal-500",
-    texto: "text-teal-700",
-    fondoSuave: "bg-teal-50",
-    borde: "border-teal-200",
-    barra: "bg-teal-600",
-    anillo: "focus:border-teal-600 focus:ring-teal-600",
+    tabActiva: "border-red-600 bg-red-50 text-red-700",
+    punto: "bg-red-500",
+    texto: "text-red-700",
+    fondoSuave: "bg-red-50",
+    borde: "border-red-200",
+    barra: "bg-red-600",
+    anillo: "focus:border-red-600 focus:ring-red-600",
   },
   addi: {
-    tabActiva: "border-purple-600 bg-purple-50 text-purple-700",
-    punto: "bg-purple-500",
-    texto: "text-purple-700",
-    fondoSuave: "bg-purple-50",
-    borde: "border-purple-200",
-    barra: "bg-purple-600",
-    anillo: "focus:border-purple-600 focus:ring-purple-600",
+    tabActiva: "border-sky-500 bg-sky-50 text-sky-700",
+    punto: "bg-sky-400",
+    texto: "text-sky-700",
+    fondoSuave: "bg-sky-50",
+    borde: "border-sky-200",
+    barra: "bg-sky-500",
+    anillo: "focus:border-sky-500 focus:ring-sky-500",
   },
   sistecredito: {
-    tabActiva: "border-lime-600 bg-lime-50 text-lime-700",
-    punto: "bg-lime-500",
-    texto: "text-lime-700",
-    fondoSuave: "bg-lime-50",
-    borde: "border-lime-200",
-    barra: "bg-lime-600",
-    anillo: "focus:border-lime-600 focus:ring-lime-600",
+    tabActiva: "border-green-600 bg-green-50 text-green-700",
+    punto: "bg-green-500",
+    texto: "text-green-700",
+    fondoSuave: "bg-green-50",
+    borde: "border-green-200",
+    barra: "bg-green-600",
+    anillo: "focus:border-green-600 focus:ring-green-600",
   },
 };
 
