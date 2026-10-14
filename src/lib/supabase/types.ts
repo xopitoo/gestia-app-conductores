@@ -240,6 +240,8 @@ export type VentaRow = {
   tramitador_id: string | null;
   /** Cuánto de esta venta le corresponde a la organización — no lo que gana el tramitador (esa es `monto - descuento + incremento - precio_tramitador`). */
   precio_tramitador: number;
+  /** Si el tramitador le cobró al cliente un monto distinto al registrado (ej. por fuera de caja), ese monto — null significa "no es distinto, usar lo que suman los venta_items de este tramitador". Puramente informativo, no afecta monto/caja. */
+  monto_cobrado_tramitador: number | null;
   /** Certificado RUNT subido — solo true si ya está paga por completo. */
   certificado: boolean;
   certificado_at: string | null;
@@ -411,6 +413,7 @@ export type Database = {
           p_categorias_licencia?: string[] | null;
           p_incremento_tipo?: DescuentoTipo | null;
           p_incremento_valor?: number;
+          p_monto_cobrado_tramitador?: number | null;
         },
         VentaRow
       >;
@@ -470,7 +473,7 @@ export type Database = {
         VentaPagoRow
       >;
       corregir_precio_tramitador_venta: FunctionDef<
-        { p_venta_id: string; p_precio_tramitador: number },
+        { p_venta_id: string; p_precio_tramitador: number; p_monto_cobrado_tramitador?: number | null },
         VentaRow
       >;
       aplicar_descuento_venta: FunctionDef<

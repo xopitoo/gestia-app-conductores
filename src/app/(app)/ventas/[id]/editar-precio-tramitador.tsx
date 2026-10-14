@@ -7,16 +7,19 @@ import { linkClass } from "@/lib/ui";
 
 /**
  * Corrección puntual del precio especial (lo que le corresponde a la
- * organización) de una venta ya creada — antes no existía forma de arreglar
- * esto si quedaba mal cargado (ej. se editó a mano sin querer y quedó en
- * $0), solo se podía ver, nunca corregir. Admin-only.
+ * organización) y/o el monto que el tramitador le cobró al cliente por fuera
+ * de caja, de una venta ya creada — antes no existía forma de arreglar esto
+ * si quedaba mal cargado (ej. se editó a mano sin querer y quedó en $0),
+ * solo se podía ver, nunca corregir. Admin-only.
  */
 export function EditarPrecioTramitador({
   ventaId,
   precioActual,
+  montoCobradoActual,
 }: {
   ventaId: string;
   precioActual: number;
+  montoCobradoActual: number | null;
 }) {
   const [editando, setEditando] = useState(false);
   const accionConVenta = corregirPrecioTramitador.bind(null, ventaId);
@@ -46,6 +49,7 @@ export function EditarPrecioTramitador({
 
   return (
     <form action={formAction} className="mt-1 flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-slate-400">Precio especial</span>
       <input
         name="precio_tramitador"
         type="number"
@@ -53,7 +57,17 @@ export function EditarPrecioTramitador({
         step="1"
         defaultValue={precioActual}
         autoFocus
-        className="w-32 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+        className="w-28 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+      />
+      <span className="text-xs text-slate-400">Cobrado al cliente</span>
+      <input
+        name="monto_cobrado_tramitador"
+        type="number"
+        min={0}
+        step="1"
+        defaultValue={montoCobradoActual ?? ""}
+        placeholder="(igual al registrado)"
+        className="w-36 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
       />
       <button
         type="submit"

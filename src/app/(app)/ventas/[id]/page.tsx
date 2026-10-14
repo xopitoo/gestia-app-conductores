@@ -28,7 +28,7 @@ export default async function VentaDetailPage({
   const { data: venta } = await supabase
     .from("ventas")
     .select(
-      "id, sede_id, cliente_id, concepto, monto, descuento, incremento, estado, referido_nombre, tramitador_id, precio_tramitador, certificado, certificado_at, certificado_path, created_at",
+      "id, sede_id, cliente_id, concepto, monto, descuento, incremento, estado, referido_nombre, tramitador_id, precio_tramitador, monto_cobrado_tramitador, certificado, certificado_at, certificado_path, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -107,9 +107,12 @@ export default async function VentaDetailPage({
   const baseReferida = itemsReferidos.length > 0 ? itemsReferidos : (items ?? []);
   const montoReferido = baseReferida.reduce((acc, item) => acc + item.precio, 0);
   const descuentoProporcional = venta.monto > 0 ? Math.round((venta.descuento * montoReferido) / venta.monto) : 0;
-  const montoReferidoNeto = montoReferido - descuentoProporcional;
+  // Si el tramitador le cobró al cliente un monto distinto al registrado (por
+  // fuera de caja), ese es el que cuenta como "lo que trajo" — ver comentario
+  // en la columna monto_cobrado_tramitador.
+  const montoReferidoNeto = venta.monto_cobrado_tramitador ?? montoReferido - descuentoProporcional;
   const gananciaTramitador = Math.max(0, montoReferidoNeto - venta.precio_tramitador);
-  const hayItemsAjenos = montoReferido < venta.monto;
+  const hayItemsAjenos = montoReferido < venta.monto && venta.monto_cobrado_tramitador === null;
 
   // Solo admin puede cruzar (cruzar_saldo_tramitador es admin-only), y solo
   // tiene sentido calcularlo cuando de verdad podría usarse.
@@ -147,12 +150,17 @@ export default async function VentaDetailPage({
               <div className="mt-1 text-xs text-indigo-600">
                 <p>
                   Tramitador: {tramitador.nombre} — precio especial {formatCOP(venta.precio_tramitador)}, ganancia
-                  del tramitador {formatCOP(gananciaTramitador)} sobre {formatCOP(montoReferidoNeto)} (lo que él
-                  trajo){hayItemsAjenos ? "; el resto de la orden no le corresponde a él" : ""}
+                  del tramitador {formatCOP(gananciaTramitador)} sobre {formatCOP(montoReferidoNeto)} (
+                  {venta.monto_cobrado_tramitador !== null ? "lo que él cobró" : "lo que él trajo"})
+                  {hayItemsAjenos ? "; el resto de la orden no le corresponde a él" : ""}
                   {profile.role === "admin" ? (
                     <>
                       {" "}
-                      <EditarPrecioTramitador ventaId={venta.id} precioActual={venta.precio_tramitador} />
+                      <EditarPrecioTramitador
+                        ventaId={venta.id}
+                        precioActual={venta.precio_tramitador}
+                        montoCobradoActual={venta.monto_cobrado_tramitador}
+                      />
                     </>
                   ) : null}
                 </p>

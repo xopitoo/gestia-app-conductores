@@ -114,10 +114,16 @@ export async function corregirPrecioTramitador(
   if (!Number.isFinite(precioTramitador) || precioTramitador < 0) {
     return { error: "Ingresá un monto válido." };
   }
+  const montoCobradoRaw = String(formData.get("monto_cobrado_tramitador") ?? "");
+  const montoCobradoTramitador = montoCobradoRaw ? Number(montoCobradoRaw) : null;
+  if (montoCobradoTramitador !== null && (!Number.isFinite(montoCobradoTramitador) || montoCobradoTramitador < 0)) {
+    return { error: "Ingresá un monto cobrado válido." };
+  }
 
   const { error } = await supabase.rpc("corregir_precio_tramitador_venta", {
     p_venta_id: ventaId,
     p_precio_tramitador: precioTramitador,
+    p_monto_cobrado_tramitador: montoCobradoTramitador,
   });
 
   if (error) {

@@ -192,6 +192,11 @@ export function VentaForm({
   const [incrementoValor, setIncrementoValor] = useState(0);
   const [tramitadorId, setTramitadorId] = useState("");
   const [precioTramitador, setPrecioTramitador] = useState(0);
+  // null = "el tramitador no le cobró al cliente un monto distinto al
+  // registrado" (el caso normal) — un número solo cuando el admin/recepcionista
+  // marca explícitamente que hubo un cobro aparte, por fuera de caja (ver
+  // bloque "¿Le cobró al cliente un monto distinto?" más abajo).
+  const [montoCobradoTramitador, setMontoCobradoTramitador] = useState<number | null>(null);
   const [categoriasLicencia, setCategoriasLicencia] = useState<string[]>([]);
 
   // Suma al set de categorías las recién detectadas en el carrito (sin
@@ -566,6 +571,7 @@ export function VentaForm({
                 const id = e.target.value;
                 setTramitadorId(id);
                 setPrecioTramitador(id ? precioSugerido(id, items) : 0);
+                setMontoCobradoTramitador(null);
               }}
               className={inputClass}
             >
@@ -607,19 +613,60 @@ export function VentaForm({
               const gananciaBruta = Math.max(0, totalReferido - precioTramitador);
               const descuentoProporcional =
                 total > 0 ? Math.round((descuentoMonto * totalReferido) / total) : 0;
-              const totalReferidoNeto = totalReferido - descuentoProporcional;
+              // Si el tramitador le cobró al cliente un monto distinto al registrado
+              // (por fuera de caja), ese es el que cuenta como "lo que trajo" — sin
+              // restarle el descuento proporcional, porque ese descuento es sobre lo
+              // que cobra Gestia, no sobre el trato aparte con el cliente.
+              const totalReferidoNeto = montoCobradoTramitador ?? totalReferido - descuentoProporcional;
               const gananciaTramitador = Math.max(0, totalReferidoNeto - precioTramitador);
               const hayItemsAjenos = totalReferido < total;
               const ajusteAplicado =
                 gananciaBruta > 0 && descuentoTipo === "fijo" && descuentoValor === gananciaBruta;
               return (
                 <div className="flex flex-col gap-2">
+                  <input
+                    type="hidden"
+                    name="monto_cobrado_tramitador"
+                    value={montoCobradoTramitador ?? ""}
+                  />
                   <p className="text-xs text-slate-500">
                     El precio especial (lo que le corresponde a la organización) es {formatCOP(precioTramitador)} —
                     la ganancia del tramitador sería {formatCOP(gananciaTramitador)} sobre{" "}
-                    {formatCOP(totalReferidoNeto)} (lo que él trajo)
-                    {hayItemsAjenos ? "; el resto de la orden no le corresponde a él." : "."}
+                    {formatCOP(totalReferidoNeto)} ({montoCobradoTramitador !== null ? "lo que él cobró" : "lo que él trajo"})
+                    {hayItemsAjenos && montoCobradoTramitador === null
+                      ? "; el resto de la orden no le corresponde a él."
+                      : "."}
                   </p>
+                  {montoCobradoTramitador === null ? (
+                    <button
+                      type="button"
+                      onClick={() => setMontoCobradoTramitador(totalReferido - descuentoProporcional)}
+                      className={`self-start ${linkClass("neutral")}`}
+                    >
+                      ¿Le cobró al cliente un monto distinto (por fuera de caja)?
+                    </button>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                        Monto que le cobró al cliente
+                        <input
+                          type="number"
+                          min={0}
+                          step="1000"
+                          value={montoCobradoTramitador}
+                          onChange={(e) => setMontoCobradoTramitador(Math.max(0, Number(e.target.value) || 0))}
+                          className="w-32 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setMontoCobradoTramitador(null)}
+                        className={linkClass("neutral")}
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  )}
                   {gananciaBruta > 0 ? (
                     ajusteAplicado ? (
                       <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5">

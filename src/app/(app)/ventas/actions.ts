@@ -27,6 +27,8 @@ export async function registrarVenta(
   const descuentoValor = Number(formData.get("descuento_valor") ?? 0) || 0;
   const tramitadorId = String(formData.get("tramitador_id") ?? "") || null;
   const precioTramitador = Number(formData.get("precio_tramitador") ?? 0) || 0;
+  const montoCobradoTramitadorRaw = String(formData.get("monto_cobrado_tramitador") ?? "");
+  const montoCobradoTramitador = montoCobradoTramitadorRaw ? Number(montoCobradoTramitadorRaw) || 0 : null;
   const incrementoTipo = (String(formData.get("incremento_tipo") ?? "") || null) as DescuentoTipo | null;
   const incrementoValor = Number(formData.get("incremento_valor") ?? 0) || 0;
   const categoriasLicenciaRaw = String(formData.get("categorias_licencia") ?? "[]");
@@ -68,6 +70,7 @@ export async function registrarVenta(
     p_categorias_licencia: categoriasLicencia.length > 0 ? categoriasLicencia : null,
     p_incremento_tipo: incrementoTipo,
     p_incremento_valor: incrementoValor,
+    p_monto_cobrado_tramitador: montoCobradoTramitador,
   });
 
   if (error) {
@@ -84,6 +87,9 @@ export async function registrarVenta(
       return { error: error.message };
     }
     if (error.message.includes("precio del tramitador")) {
+      return { error: error.message };
+    }
+    if (error.message.includes("monto cobrado por el tramitador")) {
       return { error: error.message };
     }
     if (error.message.includes("superar el total")) {

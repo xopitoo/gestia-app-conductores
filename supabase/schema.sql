@@ -414,6 +414,19 @@ alter table public.ventas add column if not exists precio_tramitador numeric(12,
 alter table public.ventas drop constraint if exists ventas_precio_tramitador_chk;
 alter table public.ventas add constraint ventas_precio_tramitador_chk check (precio_tramitador >= 0);
 
+-- monto_cobrado_tramitador: para cuando el tramitador le cobra al cliente un
+-- monto distinto al que queda registrado en la venta (ej. el cliente paga
+-- $200.000 directo al tramitador por fuera de caja, pero en Gestia solo se
+-- registran los $140.000 que le corresponden a la organización). NULL
+-- (default) significa "no es distinto" — se sigue usando lo que suman los
+-- venta_items de este tramitador (monto_referido), igual que antes de que
+-- existiera esta columna. No tiene tope superior a propósito: por diseño
+-- puede superar el total registrado de la venta.
+alter table public.ventas add column if not exists monto_cobrado_tramitador numeric(12, 2);
+alter table public.ventas drop constraint if exists ventas_monto_cobrado_tramitador_chk;
+alter table public.ventas add constraint ventas_monto_cobrado_tramitador_chk
+  check (monto_cobrado_tramitador is null or monto_cobrado_tramitador >= 0);
+
 -- Bucket privado para los certificados RUNT subidos (nunca público — se
 -- accede siempre con signed URLs de corta duración, generadas en el
 -- servidor). Las políticas de storage.objects de abajo son el único modo de
@@ -965,7 +978,8 @@ create or replace function public.registrar_venta(
   p_precio_tramitador numeric default 0,
   p_categorias_licencia text[] default null,
   p_incremento_tipo text default null,
-  p_incremento_valor numeric default 0
+  p_incremento_valor numeric default 0,
+  p_monto_cobrado_tramitador numeric default null
 )
 returns public.ventas
 language plpgsql
@@ -1068,16 +1082,21 @@ begin
   if p_precio_tramitador > v_monto_neto then
     raise exception 'El precio del tramitador no puede superar el total de la orden';
   end if;
+  if p_monto_cobrado_tramitador is not null and p_monto_cobrado_tramitador < 0 then
+    raise exception 'El monto cobrado por el tramitador no puede ser negativo';
+  end if;
 
   insert into public.ventas (
     organization_id, sede_id, cliente_id, concepto, monto, estado, vendedor_id, referido_nombre,
-    descuento, incremento, tramitador_id, precio_tramitador, categorias_licencia, created_by
+    descuento, incremento, tramitador_id, precio_tramitador, monto_cobrado_tramitador, categorias_licencia,
+    created_by
   )
   values (
     v_org_id, p_sede_id, p_cliente_id, v_concepto, v_monto_total,
     case when v_monto_pagado >= v_monto_neto then 'pagada' else 'abonada' end,
     p_vendedor_id, nullif(trim(p_referido_nombre), ''),
-    v_descuento, v_incremento, p_tramitador_id, p_precio_tramitador, p_categorias_licencia, auth.uid()
+    v_descuento, v_incremento, p_tramitador_id, p_precio_tramitador, p_monto_cobrado_tramitador,
+    p_categorias_licencia, auth.uid()
   )
   returning * into v_venta;
 
@@ -1836,11 +1855,17 @@ begin
     from (
       select
         coalesce(pagos.pagado, 0) as pagado,
+        -- coalesce con monto_cobrado_tramitador: si el tramitador le cobró al
+        -- cliente un monto distinto al registrado (ver comentario en la
+        -- columna), ese es el que cuenta como "lo que trajo" — sin el ajuste
+        -- proporcional de descuento, porque ese descuento es sobre lo que
+        -- cobra Gestia, no sobre el trato aparte con el cliente.
         (v.monto - v.descuento + v.incremento) - greatest(
           0,
-          (
+          coalesce(
+            v.monto_cobrado_tramitador,
             referidos.monto_referido
-            - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
+              - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
           ) - v.precio_tramitador
         ) as reclamo
       from public.ventas v
@@ -1929,9 +1954,10 @@ begin
         coalesce(pagos.pagado, 0) - (
           (v.monto - v.descuento + v.incremento) - greatest(
             0,
-            (
+            coalesce(
+              v.monto_cobrado_tramitador,
               referidos.monto_referido
-              - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
+                - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
             ) - v.precio_tramitador
           )
         )
@@ -1988,14 +2014,17 @@ $$;
 
 -- =========================================================
 -- CORREGIR_PRECIO_TRAMITADOR_VENTA: corrige el precio especial (lo que le
--- corresponde a la organización) de una venta ya creada — antes no existía
+-- corresponde a la organización) y/o el monto que el tramitador le cobró al
+-- cliente por fuera de caja (monto_cobrado_tramitador, ver comentario en la
+-- definición de la columna) de una venta ya creada — antes no existía
 -- ninguna forma de arreglar esto si quedaba mal cargado (ej. el campo se
 -- editó a mano por error y quedó en $0), solo se podía ver, nunca corregir.
 -- Admin-only, mismo criterio que corregir_forma_pago_venta.
 -- =========================================================
 create or replace function public.corregir_precio_tramitador_venta(
   p_venta_id uuid,
-  p_precio_tramitador numeric
+  p_precio_tramitador numeric,
+  p_monto_cobrado_tramitador numeric default null
 )
 returns public.ventas
 language plpgsql
@@ -2005,11 +2034,14 @@ as $$
 declare
   v_venta public.ventas;
 begin
-  if public.current_role() <> 'admin' then
+  if public.current_role() is null or public.current_role() <> 'admin' then
     raise exception 'Solo un administrador puede corregir el precio del tramitador';
   end if;
   if p_precio_tramitador is null or p_precio_tramitador < 0 then
     raise exception 'El precio del tramitador no puede ser negativo';
+  end if;
+  if p_monto_cobrado_tramitador is not null and p_monto_cobrado_tramitador < 0 then
+    raise exception 'El monto cobrado por el tramitador no puede ser negativo';
   end if;
 
   select * into v_venta from public.ventas where id = p_venta_id;
@@ -2024,7 +2056,8 @@ begin
   end if;
 
   update public.ventas
-  set precio_tramitador = p_precio_tramitador
+  set precio_tramitador = p_precio_tramitador,
+      monto_cobrado_tramitador = p_monto_cobrado_tramitador
   where id = p_venta_id
   returning * into v_venta;
 
