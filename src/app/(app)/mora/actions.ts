@@ -60,8 +60,8 @@ export async function agregarItem(
   formData: FormData,
 ): Promise<AgregarItemFormState> {
   const { supabase, profile } = await getViewerContext();
-  if (profile.role !== "admin") {
-    return { error: "Solo un administrador puede anexar productos." };
+  if (profile.role !== "admin" && profile.role !== "recepcionista") {
+    return { error: "No autorizado para anexar productos." };
   }
 
   const ventaId = String(formData.get("venta_id") ?? "");
@@ -81,8 +81,11 @@ export async function agregarItem(
   });
 
   if (error) {
-    if (error.message.includes("Solo un administrador")) {
-      return { error: "Solo un administrador puede anexar productos." };
+    if (error.message.includes("otra sede")) {
+      return { error: "No podés anexar productos a una venta de otra sede." };
+    }
+    if (error.message.includes("No autorizado")) {
+      return { error: "No autorizado para anexar productos." };
     }
     if (error.message.includes("nombre") || error.message.includes("precio") || error.message.includes("anulada")) {
       return { error: error.message };

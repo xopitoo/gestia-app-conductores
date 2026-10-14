@@ -68,12 +68,11 @@ export default async function MoraPage({
           .select("id, nombre_completo, numero_documento, tipo_documento, telefono, telefono_pais")
           .in("id", clienteIds)
       : Promise.resolve({ data: [] as { id: string; nombre_completo: string; numero_documento: string; tipo_documento: string; telefono: string | null; telefono_pais: string }[] }),
-    // Solo para armar el desplegable de "Anexar producto" (ver más abajo) —
-    // admin puede ver filas de varias sedes a la vez acá, así que se traen
-    // todos los catálogos activos y se filtra por sede fila por fila.
-    esAdmin
-      ? supabase.from("productos").select("id, sede_id, nombre, precio").eq("active", true)
-      : Promise.resolve({ data: [] as { id: string; sede_id: string | null; nombre: string; precio: number }[] }),
+    // Para armar el desplegable de "Anexar producto" (ver más abajo, ahora
+    // disponible para admin y recepcionista) — admin puede ver filas de
+    // varias sedes a la vez acá, así que se traen todos los catálogos
+    // activos y se filtra por sede fila por fila.
+    supabase.from("productos").select("id, sede_id, nombre, precio").eq("active", true),
   ]);
 
   const pagadoDeVenta = (id: string) =>
@@ -210,8 +209,8 @@ export default async function MoraPage({
                           · Pagado {formatCOP(f.pagado)} de {formatCOP(f.monto - f.descuento + f.incremento)}
                         </span>
                       </div>
-                      {esAdmin ? (
-                        <div className="flex flex-col items-end gap-1">
+                      <div className="flex flex-col items-end gap-1">
+                        {esAdmin ? (
                           <DescuentoForm
                             ventaId={f.ventaId}
                             montoBruto={f.monto}
@@ -219,13 +218,13 @@ export default async function MoraPage({
                             pagado={f.pagado}
                             descuentoActual={f.descuento}
                           />
-                          <AgregarItemForm ventaId={f.ventaId} productos={productosDeSede(f.sedeId)} />
-                        </div>
-                      ) : (
-                        <Link href={`/ventas/${f.ventaId}`} className={linkClass("primary")}>
-                          Ver venta / Registrar pago
-                        </Link>
-                      )}
+                        ) : (
+                          <Link href={`/ventas/${f.ventaId}`} className={linkClass("primary")}>
+                            Ver venta / Registrar pago
+                          </Link>
+                        )}
+                        <AgregarItemForm ventaId={f.ventaId} productos={productosDeSede(f.sedeId)} />
+                      </div>
                     </li>
                   ))}
                 </ul>

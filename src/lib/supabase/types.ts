@@ -181,6 +181,21 @@ export type ProductoRow = {
   updated_at: string;
 };
 
+export type FinanciadoraRow = {
+  id: string;
+  organization_id: string;
+  nombre: string;
+  /** Fracción decimal (0.021176 = 2.1176%), no porcentaje. */
+  tasa_mensual: number;
+  /** Fracción decimal sobre el monto original, prorrateada linealmente a lo largo del plazo. */
+  tasa_seguro: number;
+  plazo_max: number;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type VentaRow = {
   id: string;
   organization_id: string;
@@ -339,6 +354,7 @@ export type Database = {
       profiles: TableDef<ProfileRow>;
       clientes: TableDef<ClienteRow>;
       productos: TableDef<ProductoRow>;
+      financiadoras: TableDef<FinanciadoraRow>;
       tramitadores: TableDef<TramitadorRow>;
       tramitador_pagos: TableDef<TramitadorPagoRow>;
       tramitador_precios: TableDef<TramitadorPrecioRow>;

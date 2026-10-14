@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Banknote,
   Building2,
+  Calculator,
   ChevronsLeft,
   ChevronsRight,
   GraduationCap,
@@ -131,6 +132,9 @@ export function Sidebar({
           </NavLink>
           <NavLink href="/tramitadores" icon={<Handshake className="h-4.5 w-4.5" />} collapsed={collapsed}>
             Tramitadores
+          </NavLink>
+          <NavLink href="/simulador-credito" icon={<Calculator className="h-4.5 w-4.5" />} collapsed={collapsed}>
+            Simulador de crédito
           </NavLink>
           {showMora ? (
             <NavLink href="/mora" icon={<AlertTriangle className="h-4.5 w-4.5" />} collapsed={collapsed}>

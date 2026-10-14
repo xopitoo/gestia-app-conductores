@@ -161,6 +161,36 @@ create trigger productos_set_updated_at
   for each row execute function public.set_updated_at();
 
 -- =========================================================
+-- FINANCIADORAS (Brilla, Addi, Sistecrédito, etc.) — catálogo chico para el
+-- simulador de cuotas (/simulador-credito). Cada una tiene su propia tasa
+-- mensual (interés) y tasa de seguro deudor (sobre el monto original,
+-- prorrateada linealmente a lo largo del plazo — así calcula Brilla el
+-- suyo, confirmado contra su simulador real). Ambas tasas se guardan como
+-- fracción decimal (0.021176 = 2.1176%), no como porcentaje, para no
+-- tener que dividir por 100 en cada cálculo. Hay que actualizarlas cada
+-- tanto a mano cuando la financiadora cambia su tasa — no hay forma de
+-- traerla en vivo de ellas.
+create table if not exists public.financiadoras (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  nombre text not null,
+  tasa_mensual numeric(8, 6) not null default 0 check (tasa_mensual >= 0),
+  tasa_seguro numeric(8, 6) not null default 0 check (tasa_seguro >= 0),
+  plazo_max integer not null default 60 check (plazo_max > 0),
+  active boolean not null default true,
+  created_by uuid references public.profiles (id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists financiadoras_org_nombre_idx on public.financiadoras (organization_id, nombre);
+create index if not exists financiadoras_organization_id_idx on public.financiadoras (organization_id);
+
+drop trigger if exists financiadoras_set_updated_at on public.financiadoras;
+create trigger financiadoras_set_updated_at
+  before update on public.financiadoras
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
 -- TRAMITADORES (asesores externos que revenden el servicio — cobran lo que
 -- quieren al cliente final, pero le deben a la organización un "precio
 -- especial" fijo por cada persona que traen, ej. en un centro médico). null
@@ -2100,12 +2130,20 @@ end;
 $$;
 
 -- =========================================================
--- AGREGAR_ITEM_VENTA: le permite a un admin anexarle un producto/servicio
+-- AGREGAR_ITEM_VENTA: le permite a un admin (cualquier sede) o a un
+-- recepcionista (solo su propia sede) anexarle un producto/servicio
 -- adicional a una venta que ya existe (ej. desde "Clientes en mora": al
 -- cliente le faltaba otro trámite que no se vendió en el momento). Sube el
 -- monto de la venta y recalcula el estado (pagada/abonada), igual que
 -- aplicar_descuento_venta pero en la dirección contraria. No toca pagos ni
 -- caja — el nuevo saldo queda pendiente de cobrar como cualquier otro.
+--
+-- security definer a propósito (igual que registrar_certificado_runt): un
+-- recepcionista no tiene policy de UPDATE sobre una venta 'pagada', y el
+-- trigger lock_venta_privileged_columns bloquea tocar 'monto' fuera de
+-- admin — acá se reemplaza esa policy con el chequeo de rol+sede de abajo,
+-- y se deja la marca de sesión 'app.allow_monto_item_adicional' (local a
+-- la transacción) para que el trigger permita este UPDATE puntual.
 -- =========================================================
 create or replace function public.agregar_item_venta(
   p_venta_id uuid,
@@ -2115,16 +2153,18 @@ create or replace function public.agregar_item_venta(
 )
 returns public.ventas
 language plpgsql
-security invoker
+security definer
 set search_path = public
 as $$
 declare
   v_venta public.ventas;
   v_pagado numeric(12, 2);
   v_nombre text;
+  v_rol text;
 begin
-  if public.current_role() is distinct from 'admin' then
-    raise exception 'Solo un administrador puede anexar productos a una venta';
+  v_rol := public.current_role();
+  if v_rol is null or v_rol not in ('admin', 'recepcionista') then
+    raise exception 'No autorizado para anexar productos a una venta';
   end if;
 
   v_nombre := nullif(trim(p_nombre), '');
@@ -2139,6 +2179,9 @@ begin
   if v_venta.id is null then
     raise exception 'Venta no encontrada';
   end if;
+  if v_rol <> 'admin' and v_venta.sede_id is distinct from public.current_sede_id() then
+    raise exception 'No autorizado para anexar productos a una venta de otra sede';
+  end if;
   if v_venta.estado = 'anulada' then
     raise exception 'La venta está anulada';
   end if;
@@ -2147,6 +2190,8 @@ begin
   values (v_venta.id, v_venta.organization_id, v_venta.sede_id, p_producto_id, v_nombre, p_precio);
 
   select coalesce(sum(monto), 0) into v_pagado from public.venta_pagos where venta_id = p_venta_id;
+
+  perform set_config('app.allow_monto_item_adicional', 'true', true);
 
   update public.ventas
   set monto = monto + p_precio,
@@ -2506,6 +2551,12 @@ create trigger profiles_lock_privileged_columns
 -- la marca de sesión 'app.allow_certificado_update' (local a la
 -- transacción). Sin esa marca, cualquier intento de cambiarlas se rechaza,
 -- venga de quien venga.
+--
+-- 'monto' tiene la misma excepción puntual, pero para agregar_item_venta():
+-- un recepcionista SÍ puede subirlo (anexar un producto que le faltó a la
+-- venta), pero solo por ese camino — deja la marca
+-- 'app.allow_monto_item_adicional' antes de escribir. Nunca se le abre la
+-- puerta a bajarlo (eso sigue siendo cosa del descuento, admin-only).
 create or replace function public.lock_venta_privileged_columns()
 returns trigger
 language plpgsql
@@ -2514,7 +2565,10 @@ as $$
 begin
   if public.current_role() is distinct from 'admin' and (
     new.concepto is distinct from old.concepto
-    or new.monto is distinct from old.monto
+    or (
+      new.monto is distinct from old.monto
+      and coalesce(current_setting('app.allow_monto_item_adicional', true), '') <> 'true'
+    )
     or new.cliente_id is distinct from old.cliente_id
     or new.sede_id is distinct from old.sede_id
     or new.organization_id is distinct from old.organization_id
@@ -2721,6 +2775,24 @@ create policy "productos_insert_admin" on public.productos
 
 drop policy if exists "productos_update_admin" on public.productos;
 create policy "productos_update_admin" on public.productos
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- financiadoras: select org-wide (cualquiera usa el simulador), solo admin
+-- crea/edita las tasas.
+alter table public.financiadoras enable row level security;
+
+drop policy if exists "financiadoras_select_org" on public.financiadoras;
+create policy "financiadoras_select_org" on public.financiadoras
+  for select using (organization_id = public.current_org_id());
+
+drop policy if exists "financiadoras_insert_admin" on public.financiadoras;
+create policy "financiadoras_insert_admin" on public.financiadoras
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "financiadoras_update_admin" on public.financiadoras;
+create policy "financiadoras_update_admin" on public.financiadoras
   for update
   using (public.current_role() = 'admin' and organization_id = public.current_org_id())
   with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
