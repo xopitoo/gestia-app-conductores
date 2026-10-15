@@ -54,7 +54,7 @@ export async function getTramitadorSaldo(supabase: Supabase, tramitadorId: strin
 
 export type MovimientoExtracto = {
   fecha: string;
-  tipo: "venta" | "pago_tramitador";
+  tipo: "venta" | "abono" | "pago_tramitador";
   referenciaId: string;
   descripcion: string;
   monto: number;

@@ -9,10 +9,10 @@ import { obtenerExtractoTramitador } from "./actions";
 import type { MovimientoExtracto } from "@/lib/tramitador-saldo";
 
 /**
- * Extracto tipo bancario: una fila por cada venta suya (aporta crédito si
- * quedó pagada, deuda si quedó pendiente — mismo cálculo que
- * tramitadores_saldo en schema.sql) y una por cada pago que ya se le hizo,
- * con saldo acumulado corrido — para responder "¿de dónde salió este
+ * Extracto tipo bancario: una fila por cada venta suya (lo que se le
+ * reclama, en negativo), una verde por cada abono/pago que hicieron sus
+ * clientes y una por cada pago que ya se le hizo a él — mismo cálculo que
+ * tramitadores_saldo en schema.sql, con saldo acumulado corrido — para responder "¿de dónde salió este
  * número?" sin tener que hacer la cuenta a mano.
  *
  * Se pide bajo demanda (al abrir), no viene precargado por props como
@@ -56,7 +56,7 @@ export function ExtractoModal({ tramitadorId, tramitadorNombre }: { tramitadorId
               <div>
                 <h2 className="font-semibold text-slate-900">Extracto — {tramitadorNombre}</h2>
                 <p className="text-xs text-slate-500">
-                  Cada venta suya y cada pago que ya se le hizo, en orden, con el saldo acumulado.
+                  Cada venta suya, cada abono recibido (en verde) y cada pago que ya se le hizo, en orden, con el saldo acumulado.
                 </p>
               </div>
               <button type="button" onClick={() => setAbierto(false)} className={iconButtonClass("sm")}>
@@ -75,13 +75,16 @@ export function ExtractoModal({ tramitadorId, tramitadorNombre }: { tramitadorId
                     <tr className="sticky top-0 border-b border-slate-200 bg-white text-left text-slate-500">
                       <th className="py-1.5 pr-2 font-medium">Fecha</th>
                       <th className="py-1.5 pr-2 font-medium">Movimiento</th>
-                      <th className="py-1.5 pr-2 text-right font-medium">Aporte</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">Monto</th>
                       <th className="py-1.5 pl-2 text-right font-medium">Saldo acumulado</th>
                     </tr>
                   </thead>
                   <tbody>
                     {movimientos.map((m) => (
-                      <tr key={`${m.tipo}-${m.referenciaId}`} className="border-b border-slate-100">
+                      <tr
+                        key={`${m.tipo}-${m.referenciaId}`}
+                        className={`border-b border-slate-100 ${m.tipo === "abono" ? "bg-emerald-50" : ""}`}
+                      >
                         <td className="py-1.5 pr-2 whitespace-nowrap text-slate-500">{formatDateTime(m.fecha)}</td>
                         <td className="py-1.5 pr-2">
                           {m.tipo === "venta" ? (
@@ -93,6 +96,8 @@ export function ExtractoModal({ tramitadorId, tramitadorNombre }: { tramitadorId
                                 Pagado {formatCOP(m.pagado ?? 0)} de {formatCOP(m.total ?? 0)}
                               </p>
                             </>
+                          ) : m.tipo === "abono" ? (
+                            <p className="font-medium text-emerald-700">{m.descripcion}</p>
                           ) : (
                             <p className="font-medium text-slate-700">{m.descripcion}</p>
                           )}

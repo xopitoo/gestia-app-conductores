@@ -459,7 +459,7 @@ export type Database = {
         { p_tramitador_id: string },
         {
           fecha: string;
-          tipo: "venta" | "pago_tramitador";
+          tipo: "venta" | "abono" | "pago_tramitador";
           referencia_id: string;
           descripcion: string;
           monto: number;

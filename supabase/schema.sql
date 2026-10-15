@@ -1950,20 +1950,23 @@ begin
       'venta'::text as tipo,
       v.id as referencia_id,
       coalesce(c.nombre_completo, 'Cliente') as descripcion,
-      (
-        coalesce(pagos.pagado, 0) - (
-          (v.monto - v.descuento + v.incremento) - greatest(
-            0,
-            coalesce(
-              v.monto_cobrado_tramitador,
-              referidos.monto_referido
-                - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
-            ) - v.precio_tramitador
-          )
+      -- Solo lo que se le reclama (deuda), en negativo: lo que el cliente ya
+      -- pagó aparece aparte, una fila verde por cada pago/abono (abajo) —
+      -- la suma de ambas es idéntica al aporte neto de antes, así que el
+      -- saldo final sigue coincidiendo con tramitadores_saldo.
+      -(
+        (v.monto - v.descuento + v.incremento) - greatest(
+          0,
+          coalesce(
+            v.monto_cobrado_tramitador,
+            referidos.monto_referido
+              - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
+          ) - v.precio_tramitador
         )
       ) as monto,
       coalesce(pagos.pagado, 0) as pagado,
-      (v.monto - v.descuento + v.incremento) as total
+      (v.monto - v.descuento + v.incremento) as total,
+      0 as orden
     from public.ventas v
     left join public.clientes c on c.id = v.cliente_id
     left join lateral (
@@ -1987,6 +1990,29 @@ begin
 
     union all
 
+    -- Un pago/abono real de un cliente de este tramitador (un cruce no
+    -- cuenta: no es plata nueva, ya lo refleja el pago_tramitador de abajo).
+    select
+      vp.created_at as fecha,
+      'abono'::text as tipo,
+      vp.id as referencia_id,
+      case
+        when vp.created_at - v.created_at > interval '1 minute' then 'Abono'
+        else 'Pago inicial'
+      end || ' (' || vp.metodo_pago || ') — ' || coalesce(c.nombre_completo, 'Cliente') as descripcion,
+      vp.monto as monto,
+      null::numeric as pagado,
+      null::numeric as total,
+      1 as orden
+    from public.venta_pagos vp
+    join public.ventas v on v.id = vp.venta_id
+    left join public.clientes c on c.id = v.cliente_id
+    where v.tramitador_id = p_tramitador_id
+      and v.estado <> 'anulada'
+      and vp.metodo_pago <> 'cruce_tramitador'
+
+    union all
+
     select
       tp.created_at as fecha,
       'pago_tramitador'::text as tipo,
@@ -1994,7 +2020,8 @@ begin
       coalesce(tp.nota, 'Pago al tramitador') as descripcion,
       -tp.monto as monto,
       null::numeric as pagado,
-      null::numeric as total
+      null::numeric as total,
+      2 as orden
     from public.tramitador_pagos tp
     where tp.tramitador_id = p_tramitador_id
   )
@@ -2006,9 +2033,9 @@ begin
     e.monto,
     e.pagado,
     e.total,
-    sum(e.monto) over (order by e.fecha rows between unbounded preceding and current row) as saldo_acumulado
+    sum(e.monto) over (order by e.fecha, e.orden, e.referencia_id rows between unbounded preceding and current row) as saldo_acumulado
   from eventos e
-  order by e.fecha;
+  order by e.fecha, e.orden, e.referencia_id;
 end;
 $$;
 
