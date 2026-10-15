@@ -1990,16 +1990,13 @@ begin
 
     union all
 
-    -- Un pago/abono real de un cliente de este tramitador (un cruce no
+    -- Pago hecho en el momento de la venta: una fila por pago (un cruce no
     -- cuenta: no es plata nueva, ya lo refleja el pago_tramitador de abajo).
     select
       vp.created_at as fecha,
       'abono'::text as tipo,
       vp.id as referencia_id,
-      case
-        when vp.created_at - v.created_at > interval '1 minute' then 'Abono'
-        else 'Pago inicial'
-      end || ' (' || vp.metodo_pago || ') — ' || coalesce(c.nombre_completo, 'Cliente') as descripcion,
+      'Pago inicial — ' || vp.metodo_pago || ' (' || coalesce(c.nombre_completo, 'Cliente') || ')' as descripcion,
       vp.monto as monto,
       null::numeric as pagado,
       null::numeric as total,
@@ -2010,6 +2007,37 @@ begin
     where v.tramitador_id = p_tramitador_id
       and v.estado <> 'anulada'
       and vp.metodo_pago <> 'cruce_tramitador'
+      and vp.created_at - v.created_at <= interval '1 minute'
+
+    union all
+
+    -- Abono posterior: registrar_abono_tramitador reparte UN pago entre
+    -- varias ventas (un venta_pagos por venta, todos con el mismo
+    -- created_at) — acá se vuelve a juntar en una sola fila con la cifra
+    -- que de verdad entregó, ej. "Abono — efectivo  +$400.000".
+    select
+      g.fecha,
+      'abono'::text as tipo,
+      g.referencia_id,
+      'Abono — ' || g.metodo_pago as descripcion,
+      g.monto,
+      null::numeric as pagado,
+      null::numeric as total,
+      1 as orden
+    from (
+      select
+        vp.created_at as fecha,
+        (array_agg(vp.id order by vp.id))[1] as referencia_id,
+        vp.metodo_pago,
+        sum(vp.monto) as monto
+      from public.venta_pagos vp
+      join public.ventas v on v.id = vp.venta_id
+      where v.tramitador_id = p_tramitador_id
+        and v.estado <> 'anulada'
+        and vp.metodo_pago <> 'cruce_tramitador'
+        and vp.created_at - v.created_at > interval '1 minute'
+      group by vp.created_at, vp.metodo_pago
+    ) g
 
     union all
 
