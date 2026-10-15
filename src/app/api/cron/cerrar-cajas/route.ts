@@ -17,8 +17,12 @@ export const dynamic = "force-dynamic";
  * contar la plata física.
  */
 export async function GET(request: Request) {
+  // Falla cerrado: si CRON_SECRET no está configurado en el entorno, el
+  // endpoint se rechaza en vez de quedar público (antes, sin la variable
+  // seteada, cualquiera en internet podía llamarlo y forzar el cierre de
+  // cajas abiertas de días anteriores).
   const authHeader = request.headers.get("authorization");
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 

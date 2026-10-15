@@ -1267,7 +1267,7 @@ declare
   v_cliente_nombre text;
   v_pago_id uuid;
 begin
-  if public.current_role() <> 'admin' then
+  if public.current_role() is null or public.current_role() <> 'admin' then
     raise exception 'Solo un administrador puede cruzar el saldo de un tramitador';
   end if;
 
@@ -1773,7 +1773,7 @@ declare
   v_ventas_count int;
   v_pagos_count int;
 begin
-  if public.current_role() <> 'admin' then
+  if public.current_role() is null or public.current_role() <> 'admin' then
     raise exception 'Solo un administrador puede eliminar tramitadores';
   end if;
   if not public.verify_org_pin(p_pin) then
@@ -2324,7 +2324,7 @@ declare
   v_venta public.ventas;
   v_pagado numeric(12, 2);
 begin
-  if public.current_role() not in ('admin', 'recepcionista') then
+  if public.current_role() is null or public.current_role() not in ('admin', 'recepcionista') then
     raise exception 'No autorizado';
   end if;
   if p_certificado_path is null or length(trim(p_certificado_path)) = 0 then
