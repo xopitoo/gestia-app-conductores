@@ -21,7 +21,8 @@ export type FilaAmortizacion = {
  * `tablaFactores[n-1]` es la cuota mensual como fracción del monto para un
  * plazo de `n` cuotas, tomada directamente del simulador público real. La
  * cuota es fija (sin desglose de seguro) y el plazo queda limitado a las
- * entradas que tenga la tabla.
+ * entradas que tenga la tabla (una posición null = esa cantidad de cuotas
+ * no se ofrece, ej. Addi no ofrece 1 cuota).
  */
 export function calcularAmortizacion({
   monto,
@@ -37,7 +38,7 @@ export function calcularAmortizacion({
   /** Fracción decimal sobre el monto original, ej. 0.002154 = 0.2154%. */
   tasaSeguro: number;
   /** Tabla de factores real (cuota/monto por cantidad de cuotas), si aplica. */
-  tablaFactores?: number[] | null;
+  tablaFactores?: (number | null)[] | null;
 }): FilaAmortizacion[] {
   if (!(monto > 0) || !(plazo > 0)) return [];
 

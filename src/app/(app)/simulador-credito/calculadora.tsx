@@ -74,6 +74,11 @@ function normalizar(s: string) {
     .trim();
 }
 
+function minDe(f: FinanciadoraRow) {
+  const i = (f.tabla_factores ?? []).findIndex((x) => x != null);
+  return f.tabla_factores?.length ? Math.max(1, i + 1) : 1;
+}
+
 function temaDe(nombre: string): Tema {
   return TEMAS[normalizar(nombre)] ?? TEMA_DEFAULT;
 }
@@ -89,6 +94,11 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
   const inputClass = `w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition ${tema.anillo} focus:ring-1`;
 
   const usaTablaFactores = !!financiadora?.tabla_factores?.length;
+  // Primera cantidad de cuotas que la financiadora de verdad ofrece (ej.
+  // Addi arranca en 2: la posición de 1 cuota en su tabla es null).
+  const plazoMin = usaTablaFactores
+    ? Math.max(1, (financiadora?.tabla_factores ?? []).findIndex((f) => f != null) + 1)
+    : 1;
 
   const filas = useMemo(() => {
     if (!financiadora) return [];
@@ -123,7 +133,7 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
               type="button"
               onClick={() => {
                 setFinanciadoraId(f.id);
-                setPlazo((p) => Math.min(p, f.plazo_max));
+                setPlazo((p) => Math.max(minDe(f), Math.min(p, f.plazo_max)));
               }}
               className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                 activa ? tf.tabActiva : "border-slate-300 text-slate-600 hover:bg-slate-100"
@@ -158,16 +168,16 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-slate-700">
-                  Número de cuotas (máx. {financiadora.plazo_max})
+                  Número de cuotas ({plazoMin} a {financiadora.plazo_max})
                 </span>
                 <input
                   type="number"
-                  min={1}
+                  min={plazoMin}
                   max={financiadora.plazo_max}
                   step="1"
                   value={plazo || ""}
                   onChange={(e) =>
-                    setPlazo(Math.min(financiadora.plazo_max, Math.max(1, Number(e.target.value) || 0)))
+                    setPlazo(Math.min(financiadora.plazo_max, Math.max(plazoMin, Number(e.target.value) || 0)))
                   }
                   className={inputClass}
                 />
