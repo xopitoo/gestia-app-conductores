@@ -87,6 +87,11 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
   const [financiadoraId, setFinanciadoraId] = useState(financiadoras[0]?.id ?? "");
   const [monto, setMonto] = useState(1_000_000);
   const [plazo, setPlazo] = useState(financiadoras[0]?.plazo_max ?? 36);
+  // % de incremento que cobra la organización por financiar — distinto
+  // para cada financiadora, así que se recuerda por separado al cambiar de
+  // pestaña. Misma lógica que el incremento de una venta: se suma al valor
+  // y la financiadora cotiza sobre el total ya incrementado.
+  const [incrementos, setIncrementos] = useState<Record<string, number>>({});
 
   const financiadora = financiadoras.find((f) => f.id === financiadoraId) ?? null;
   const tema = financiadora ? temaDe(financiadora.nombre) : TEMA_DEFAULT;
@@ -100,16 +105,20 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
     ? Math.max(1, (financiadora?.tabla_factores ?? []).findIndex((f) => f != null) + 1)
     : 1;
 
+  const incrementoPct = incrementos[financiadoraId] ?? 0;
+  const incremento = Math.round((monto * incrementoPct) / 100);
+  const montoFinanciado = monto + incremento;
+
   const filas = useMemo(() => {
     if (!financiadora) return [];
     return calcularAmortizacion({
-      monto,
+      monto: montoFinanciado,
       plazo,
       tasaMensual: financiadora.tasa_mensual,
       tasaSeguro: financiadora.tasa_seguro,
       tablaFactores: financiadora.tabla_factores,
     });
-  }, [financiadora, monto, plazo]);
+  }, [financiadora, montoFinanciado, plazo]);
 
   const totalPagar = filas.reduce((acc, f) => acc + f.total, 0);
 
@@ -154,9 +163,9 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
       ) : (
         <div className={`rounded-2xl border-2 p-4 transition sm:p-5 ${tema.borde} ${tema.fondoSuave}`}>
           <div className="flex flex-col gap-5">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">Valor a financiar</span>
+                <span className="font-medium text-slate-700">Valor del producto</span>
                 <input
                   type="number"
                   min={1}
@@ -182,7 +191,32 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
                   className={inputClass}
                 />
               </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">Incremento % (opcional)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.1"
+                  value={incrementoPct || ""}
+                  placeholder="0"
+                  onChange={(e) =>
+                    setIncrementos((prev) => ({
+                      ...prev,
+                      [financiadoraId]: Math.min(100, Math.max(0, Number(e.target.value) || 0)),
+                    }))
+                  }
+                  className={inputClass}
+                />
+              </label>
             </div>
+
+            {incrementoPct > 0 ? (
+              <p className="text-xs text-slate-500">
+                Incremento de {incrementoPct}% = {formatCOP(incremento)} sobre {formatCOP(monto)} — se financia{" "}
+                <span className="font-semibold text-slate-700">{formatCOP(montoFinanciado)}</span>.
+              </p>
+            ) : null}
 
             {filas.length > 0 ? (
               <>
