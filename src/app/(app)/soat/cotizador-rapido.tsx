@@ -4,13 +4,18 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ShieldCheck } from "lucide-react";
 import { formatCOP } from "@/lib/format";
 import { buttonClass, linkClass } from "@/lib/ui";
-import { agruparSoatPorFamilia, familiaDeSoat, type AnioSoat } from "@/lib/soat";
+import { agruparSoatPorFamilia, ESTUDIO_SOAT, familiaDeSoat, type AnioSoat } from "@/lib/soat";
 import type { SoatTarifaRow } from "@/lib/supabase/types";
 
 export function CotizadorRapido({ tarifas }: { tarifas: SoatTarifaRow[] }) {
   const [familia, setFamilia] = useState<string | null>(null);
   const [anio, setAnio] = useState<AnioSoat | null>(null);
   const [tarifaId, setTarifaId] = useState<string | null>(null);
+  // Cobro propio de la organización encima de la tarifa oficial: el estudio
+  // del SOAT (fijo, editable por si algún día cambia) y un % opcional (ej.
+  // cuando se financia con Brilla/Addi/Sistecrédito, que varía por cada una).
+  const [estudio, setEstudio] = useState(ESTUDIO_SOAT);
+  const [incrementoPct, setIncrementoPct] = useState(0);
 
   const familias = useMemo(() => agruparSoatPorFamilia(tarifas), [tarifas]);
 
@@ -24,6 +29,10 @@ export function CotizadorRapido({ tarifas }: { tarifas: SoatTarifaRow[] }) {
   }, [familiaActual, anio]);
 
   const tarifaElegida = tarifas.find((t) => t.id === tarifaId) ?? null;
+  // El incremento % se calcula sobre SOAT + estudio, que es lo que se financia.
+  const baseIncremento = (tarifaElegida?.total ?? 0) + estudio;
+  const incremento = Math.round((baseIncremento * incrementoPct) / 100);
+  const totalCobrar = baseIncremento + incremento;
 
   function reiniciar() {
     setFamilia(null);
@@ -55,8 +64,55 @@ export function CotizadorRapido({ tarifas }: { tarifas: SoatTarifaRow[] }) {
           <p className="text-xs text-slate-400">
             {tarifaElegida.categoria} · {tarifaElegida.descripcion}
           </p>
-          <p className="mt-1 text-3xl font-bold text-indigo-700">{formatCOP(tarifaElegida.total)}</p>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-500">
+          <p className="mt-1 text-3xl font-bold text-indigo-700">{formatCOP(totalCobrar)}</p>
+          <p className="text-xs text-slate-400">Total a cobrar al cliente</p>
+
+          <div className="mt-3 flex flex-col gap-1 rounded-lg bg-slate-50 p-3 text-sm">
+            <div className="flex justify-between text-slate-600">
+              <span>SOAT (tarifa oficial)</span>
+              <span className="font-medium">{formatCOP(tarifaElegida.total)}</span>
+            </div>
+            <div className="flex justify-between text-slate-600">
+              <span>Estudio del SOAT</span>
+              <span className="font-medium">{formatCOP(estudio)}</span>
+            </div>
+            {incrementoPct > 0 ? (
+              <div className="flex justify-between text-slate-600">
+                <span>Incremento {incrementoPct}%</span>
+                <span className="font-medium">{formatCOP(incremento)}</span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Estudio ($)
+              <input
+                type="number"
+                min={0}
+                step="1000"
+                value={estudio}
+                onChange={(e) => setEstudio(Math.max(0, Number(e.target.value) || 0))}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Incremento % (opcional)
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step="0.1"
+                value={incrementoPct || ""}
+                placeholder="0"
+                onChange={(e) => setIncrementoPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+              />
+            </label>
+          </div>
+
+          <p className="mt-4 text-[11px] font-medium tracking-wide text-slate-400 uppercase">Desglose de la tarifa oficial</p>
+          <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-slate-500">
             <div>
               <p className="text-slate-400">Prima</p>
               <p className="font-medium text-slate-700">{formatCOP(tarifaElegida.prima)}</p>

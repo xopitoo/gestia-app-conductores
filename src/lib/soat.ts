@@ -1,5 +1,8 @@
 import type { SoatTarifaRow } from "@/lib/supabase/types";
 
+/** Lo que la organización cobra de más, por cualquier SOAT, por el estudio del trámite. */
+export const ESTUDIO_SOAT = 20_000;
+
 export type AnioSoat = "0-9" | "10+";
 
 /**
