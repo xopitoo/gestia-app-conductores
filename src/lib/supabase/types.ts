@@ -476,6 +476,7 @@ export type Database = {
         { p_venta_id: string; p_precio_tramitador: number; p_monto_cobrado_tramitador?: number | null },
         VentaRow
       >;
+      corregir_items_venta: FunctionDef<{ p_venta_id: string; p_items: VentaItemInput[] }, VentaRow>;
       aplicar_descuento_venta: FunctionDef<
         {
           p_venta_id: string;

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getViewerContext } from "@/lib/viewer";
 import { parsePagos } from "../parse-form-arrays";
 import { adjuntarComprobantes } from "@/lib/comprobante-pago";
-import type { MetodoPago } from "@/lib/supabase/types";
+import type { MetodoPago, VentaItemInput } from "@/lib/supabase/types";
 
 export type AbonoFormState = {
   error?: string;
@@ -252,5 +252,46 @@ export async function subirCertificadoRunt(
 
   revalidatePath(`/ventas/${ventaId}`);
   revalidatePath("/ventas");
+  return {};
+}
+
+export type CorregirProductosState = { error?: string };
+
+/**
+ * Reemplaza los productos de una venta ya creada sin tocar sus pagos (ver
+ * corregir_items_venta en schema.sql). Solo admin: bajar el total afecta la
+ * plata, igual que el descuento.
+ */
+export async function corregirProductosVenta(
+  ventaId: string,
+  items: VentaItemInput[],
+): Promise<CorregirProductosState> {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") {
+    return { error: "No autorizado." };
+  }
+
+  const limpios = items.map((i) => ({
+    producto_id: i.producto_id || null,
+    nombre: String(i.nombre ?? "").trim(),
+    precio: Number(i.precio) || 0,
+  }));
+  if (limpios.length === 0 || limpios.some((i) => !i.nombre || !(i.precio > 0))) {
+    return { error: "Cada producto necesita nombre y un precio mayor a cero." };
+  }
+
+  const { error } = await supabase.rpc("corregir_items_venta", { p_venta_id: ventaId, p_items: limpios });
+  if (error) {
+    const conocidos = ["por debajo de lo ya pagado", "certificado RUNT", "anulada", "descuento", "precio especial", "al menos un producto"];
+    if (conocidos.some((c) => error.message.includes(c))) {
+      return { error: `${error.message}.` };
+    }
+    return { error: "No se pudieron corregir los productos." };
+  }
+
+  revalidatePath(`/ventas/${ventaId}`);
+  revalidatePath("/ventas");
+  revalidatePath("/mora");
+  revalidatePath("/dashboard");
   return {};
 }

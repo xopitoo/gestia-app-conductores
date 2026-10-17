@@ -10,6 +10,7 @@ import { AbonoForm } from "./abono-form";
 import { CertificadoRuntForm } from "./certificado-runt-form";
 import { CruceTramitadorForm } from "./cruce-tramitador-form";
 import { EditarMetodoPago } from "./editar-metodo-pago";
+import { CorregirProductos } from "./corregir-productos";
 import { EditarPrecioTramitador } from "./editar-precio-tramitador";
 import { RuntBadge } from "@/app/(app)/clientes/runt-badge";
 import { RuntConsultaLink } from "@/components/runt-link";
@@ -79,6 +80,22 @@ export default async function VentaDetailPage({
         .select("producto_id, precio_especial")
         .eq("tramitador_id", venta.tramitador_id)
     : { data: [] as { producto_id: string; precio_especial: number }[] };
+
+  // Catálogo para "Corregir productos" (solo admin, venta viva y sin certificado): mismo criterio
+  // que "Nueva venta" — si la sede tiene catálogo propio no se mezcla con el general.
+  const puedeCorregirProductos = profile.role === "admin" && venta.estado !== "anulada" && !venta.certificado;
+  const productosCorreccion = puedeCorregirProductos
+    ? await (async () => {
+        const { data } = await supabase
+          .from("productos")
+          .select("id, nombre, precio, sede_id")
+          .eq("active", true)
+          .or(`sede_id.is.null,sede_id.eq.${venta.sede_id}`)
+          .order("nombre");
+        const propios = (data ?? []).filter((p) => p.sede_id === venta.sede_id);
+        return propios.length > 0 ? propios : (data ?? []);
+      })()
+    : [];
 
   const comprobanteUrls = new Map(
     await Promise.all(
@@ -189,6 +206,22 @@ export default async function VentaDetailPage({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="mb-3 text-sm font-semibold text-slate-800">Productos</h2>
+          {puedeCorregirProductos ? (
+            <div className="mb-3">
+              <CorregirProductos
+                ventaId={venta.id}
+                itemsActuales={(items ?? []).map((i) => ({
+                  producto_id: i.producto_id,
+                  nombre: i.nombre,
+                  precio: i.precio,
+                }))}
+                productos={productosCorreccion}
+                pagado={pagado}
+                descuento={venta.descuento}
+                incremento={venta.incremento}
+              />
+            </div>
+          ) : null}
           <ul className="flex flex-col divide-y divide-slate-100">
             {(items ?? []).map((item) => (
               <li key={item.id} className="flex items-center justify-between py-2 text-sm">
