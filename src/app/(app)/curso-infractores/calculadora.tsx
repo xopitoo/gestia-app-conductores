@@ -24,6 +24,8 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
   const [multa, setMulta] = useState(0);
   const [tipo, setTipo] = useState<TipoNotificacion>("fisico");
   const [fecha, setFecha] = useState("");
+  // % que la organización suma encima del valor del curso (varía, se escribe a mano).
+  const [incrementoPct, setIncrementoPct] = useState(0);
 
   const dias = fecha ? diasTranscurridos(fecha) : null;
   const resultado = useMemo(() => {
@@ -31,10 +33,12 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
     return calcularCursoInfractor({ multa, dias, tipo, porcentajeCurso });
   }, [multa, dias, tipo, porcentajeCurso]);
 
+  const incremento = resultado ? Math.round((resultado.valorCurso * incrementoPct) / 100) : 0;
+
   return (
     <div className="flex flex-col gap-5">
       <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-slate-700">Valor de la multa</span>
             <input
@@ -61,6 +65,19 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
               value={fecha}
               max={hoyISO()}
               onChange={(e) => setFecha(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-slate-700">Incremento % (opcional)</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step="0.1"
+              value={incrementoPct || ""}
+              placeholder="0"
+              onChange={(e) => setIncrementoPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
               className={inputClass}
             />
           </label>
@@ -109,7 +126,14 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
               </div>
               <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
                 <p className="text-xs text-indigo-500">Valor del curso (lo cobrás acá)</p>
-                <p className="mt-1 text-xl font-semibold text-indigo-700">{formatCOP(resultado.valorCurso)}</p>
+                <p className="mt-1 text-xl font-semibold text-indigo-700">
+                  {formatCOP(resultado.valorCurso + incremento)}
+                </p>
+                {incrementoPct > 0 ? (
+                  <p className="mt-1 text-xs text-indigo-500">
+                    {formatCOP(resultado.valorCurso)} + {incrementoPct}% ({formatCOP(incremento)})
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4 sm:col-span-2">
                 <p className="text-xs text-slate-400">Saldo que el cliente paga en el SIMIT</p>
