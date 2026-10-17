@@ -34,21 +34,42 @@ export default async function VentasPage({
   const { supabase, profile, sedes } = ctx;
   const sedeFilter = resolveSedeFilter(ctx, params.sede);
 
-  // Por defecto, solo las ventas de hoy (en hora de Bogotá) — si el
-  // usuario busca por fecha a mano, esos parámetros mandan.
+  // Sin fechas ni búsqueda: solo las ventas de hoy (hora de Bogotá). Si se busca
+  // un cliente y no se ponen fechas, se busca en TODAS las fechas (hay clientes
+  // con ventas de hace años). Si se ponen fechas a mano, esas mandan siempre.
   const { start: hoyInicio, end: hoyFin } = bogotaTodayRange();
+  const q = params.q?.trim() ?? "";
+  const buscandoCliente = q !== "" && !params.desde && !params.hasta;
   const desde = params.desde || hoyInicio.toISOString().slice(0, 10);
   const hasta = params.hasta || hoyFin.toISOString().slice(0, 10);
+
+  // El cliente se busca en la base (nombre con todas las palabras, o documento si son
+  // solo dígitos) y no filtrando en memoria: sobre todas las fechas hay miles de
+  // ventas y PostgREST devuelve máximo 1000 filas por consulta.
+  let clienteIdsBusqueda: string[] | null = null;
+  if (q !== "") {
+    const limpio = q.replace(/[%_,]/g, " ");
+    let cq = supabase.from("clientes").select("id").limit(500);
+    if (/^\d+$/.test(limpio)) {
+      cq = cq.ilike("numero_documento", `%${limpio}%`);
+    } else {
+      for (const palabra of limpio.split(/\s+/).filter(Boolean)) {
+        cq = cq.ilike("nombre_completo", `%${palabra}%`);
+      }
+    }
+    const { data: coincidencias } = await cq;
+    clienteIdsBusqueda = (coincidencias ?? []).map((c) => c.id);
+  }
 
   let query = supabase
     .from("ventas")
     .select(
       "id, sede_id, cliente_id, tramitador_id, concepto, monto, descuento, incremento, estado, vendedor_id, certificado, categorias_licencia, created_at, monto_cobrado_tramitador",
     )
-    .gte("created_at", desde)
-    .lt("created_at", hasta)
     .order("created_at", { ascending: false });
 
+  if (!buscandoCliente) query = query.gte("created_at", desde).lt("created_at", hasta);
+  if (clienteIdsBusqueda) query = query.in("cliente_id", clienteIdsBusqueda.length ? clienteIdsBusqueda : ["00000000-0000-0000-0000-000000000000"]);
   if (sedeFilter) query = query.eq("sede_id", sedeFilter);
   if (params.estado) query = query.eq("estado", params.estado as EstadoVenta);
 
@@ -78,9 +99,7 @@ export default async function VentasPage({
   const pagadoDeVenta = (id: string) =>
     (pagosRows ?? []).filter((p) => p.venta_id === id).reduce((acc, p) => acc + p.monto, 0);
 
-  let filtered = params.q
-    ? (ventas ?? []).filter((v) => clienteName(v.cliente_id).toLowerCase().includes(params.q!.toLowerCase()))
-    : (ventas ?? []);
+  let filtered = ventas ?? [];
 
   if (params.metodo) {
     const metodoParam = params.metodo;
@@ -99,14 +118,17 @@ export default async function VentasPage({
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginaVentas = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  // Los KPIs son "del período": al buscar un cliente en todas las fechas no aplican.
   const pagosPeriodoQuery = supabase
     .from("venta_pagos")
     .select("monto, sede_id")
     .gte("created_at", desde)
     .lt("created_at", hasta);
-  const { data: pagosPeriodo } = sedeFilter
-    ? await pagosPeriodoQuery.eq("sede_id", sedeFilter)
-    : await pagosPeriodoQuery;
+  const { data: pagosPeriodo } = buscandoCliente
+    ? { data: [] as { monto: number; sede_id: string }[] }
+    : sedeFilter
+      ? await pagosPeriodoQuery.eq("sede_id", sedeFilter)
+      : await pagosPeriodoQuery;
   const ingresoTotal = (pagosPeriodo ?? []).reduce((acc, p) => acc + p.monto, 0);
 
   const cajaFilter = supabase
@@ -115,9 +137,11 @@ export default async function VentasPage({
     .eq("tipo", "egreso")
     .gte("created_at", desde)
     .lt("created_at", hasta);
-  const { data: egresosRows } = sedeFilter
-    ? await cajaFilter.eq("sede_id", sedeFilter)
-    : await cajaFilter;
+  const { data: egresosRows } = buscandoCliente
+    ? { data: [] as { monto: number; sede_id: string }[] }
+    : sedeFilter
+      ? await cajaFilter.eq("sede_id", sedeFilter)
+      : await cajaFilter;
   const egresos = (egresosRows ?? []).reduce((acc, e) => acc + e.monto, 0);
   const balanceNeto = ingresoTotal - egresos;
 
@@ -144,7 +168,7 @@ export default async function VentasPage({
         </div>
       </div>
 
-      {profile.role === "admin" ? (
+      {profile.role === "admin" && !buscandoCliente ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="Ingreso total" value={formatCOP(ingresoTotal)} caption="Cobrado en el período (incl. abonos)" tone="emerald" />
           <KpiCard label="Egresos" value={formatCOP(egresos)} caption="Gastos operativos del período" tone="red" />
@@ -183,11 +207,16 @@ export default async function VentasPage({
           <option value="abonada">Abonada</option>
           <option value="anulada">Anulada</option>
         </select>
-        <input type="date" name="desde" defaultValue={desde} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-600" />
-        <input type="date" name="hasta" defaultValue={hasta} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-600" />
+        <input type="date" name="desde" defaultValue={params.desde ?? ""} aria-label="Desde" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-600" />
+        <input type="date" name="hasta" defaultValue={params.hasta ?? ""} aria-label="Hasta" className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-600" />
         <button type="submit" className={buttonClass("secondary")}>
           Filtrar
         </button>
+        <p className="w-full text-xs text-slate-400">
+          {buscandoCliente
+            ? "Mostrando las ventas de ese cliente en todas las fechas. Pon fechas si quieres acotar."
+            : "Sin fechas se muestran las ventas de hoy; si buscas un cliente, se busca en todas las fechas."}
+        </p>
       </form>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
