@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
-import { calcularCursoInfractor, diasTranscurridos, type TipoNotificacion } from "@/lib/curso-infractores";
+import { ADICIONAL_PSE, calcularCursoInfractor, diasTranscurridos, type TipoNotificacion } from "@/lib/curso-infractores";
 import { formatCOP } from "@/lib/format";
 import { badgeClass, buttonClass } from "@/lib/ui";
 
@@ -137,7 +137,12 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4 sm:col-span-2">
                 <p className="text-xs text-slate-400">Saldo que el cliente paga en el SIMIT</p>
-                <p className="mt-1 text-xl font-semibold text-slate-700">{formatCOP(resultado.saldoMulta)}</p>
+                <p className="mt-1 text-xl font-semibold text-slate-700">
+                  {formatCOP(resultado.saldoMulta + ADICIONAL_PSE)}
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  {formatCOP(resultado.saldoMulta)} + {formatCOP(ADICIONAL_PSE)} de adicional SIMIT
+                </p>
               </div>
             </div>
           )}

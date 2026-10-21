@@ -1,3 +1,6 @@
+/** Lo que el SIMIT cobra de más cuando el saldo se paga por PSE ("Adicional pago PSE"). */
+export const ADICIONAL_PSE = 45_000;
+
 export type TipoNotificacion = "fisico" | "foto";
 export type TierDescuento = "50" | "25" | "vencido";
 
