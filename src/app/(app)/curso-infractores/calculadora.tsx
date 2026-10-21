@@ -32,9 +32,10 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
   const [multa, setMulta] = useState(0);
   const [tipo, setTipo] = useState<TipoNotificacion>("fisico");
   const [fecha, setFecha] = useState("");
-  // % que la organización suma encima del valor del curso: arranca en 28% (el margen
-  // de CEAPP) y se puede cambiar a mano. El saldo del SIMIT no cambia.
-  const [incrementoPct, setIncrementoPct] = useState(28);
+  // % que la organización suma encima del valor del curso. null = sin tocar: 28% si el curso
+  // sale de la fórmula (el margen de CEAPP) y 0% si ya tiene precio fijo; al escribir uno
+  // a mano se aplica sobre cualquiera de los dos. El saldo del SIMIT no cambia.
+  const [incrementoManual, setIncrementoManual] = useState<number | null>(null);
 
   const dias = fecha ? diasTranscurridos(fecha) : null;
   const resultado = useMemo(() => {
@@ -51,7 +52,8 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
   // Con precio fijo por tipo  el valor ya incluye el margen: no lleva incremento %.
   const tipoInfraccion = tipoInfraccionDe(multa) ?? "";
   const precioFijo = !!resultado && cursoFijoDe(tipoInfraccion, resultado.tier) !== undefined;
-  const incremento = resultado && !precioFijo ? Math.round((resultado.valorCurso * incrementoPct) / 100) : 0;
+  const incrementoPct = incrementoManual ?? (precioFijo ? 0 : 28);
+  const incremento = resultado ? Math.round((resultado.valorCurso * incrementoPct) / 100) : 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -93,9 +95,10 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
               min={0}
               max={100}
               step="0.1"
-              value={incrementoPct || ""}
-              placeholder="0"
-              onChange={(e) => setIncrementoPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+              value={incrementoManual ?? incrementoPct}
+              onChange={(e) =>
+                setIncrementoManual(e.target.value === "" ? null : Math.min(100, Math.max(0, Number(e.target.value) || 0)))
+              }
               className={inputClass}
             />
           </label>
@@ -147,12 +150,13 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
                 <p className="mt-1 text-xl font-semibold text-indigo-700">
                   {formatCOP(resultado.valorCurso + incremento)}
                 </p>
-                {precioFijo ? (
-                  <p className="mt-1 text-xs text-indigo-500">Precio fijo del tipo {tipoInfraccion}</p>
-                ) : incrementoPct > 0 ? (
+                {incrementoPct > 0 ? (
                   <p className="mt-1 text-xs text-indigo-500">
-                    {formatCOP(resultado.valorCurso)} + {incrementoPct}% ({formatCOP(incremento)})
+                    {precioFijo ? `Precio fijo tipo ${tipoInfraccion}` : "Curso"} {formatCOP(resultado.valorCurso)} +{" "}
+                    {incrementoPct}% ({formatCOP(incremento)})
                   </p>
+                ) : precioFijo ? (
+                  <p className="mt-1 text-xs text-indigo-500">Precio fijo del tipo {tipoInfraccion}</p>
                 ) : null}
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-4 sm:col-span-2">
