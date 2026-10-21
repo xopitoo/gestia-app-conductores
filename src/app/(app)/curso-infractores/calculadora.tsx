@@ -2,7 +2,15 @@
 
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
-import { ADICIONAL_PSE, calcularCursoInfractor, diasTranscurridos, type TipoNotificacion } from "@/lib/curso-infractores";
+import {
+  ADICIONAL_PSE,
+  cursoFijoDe,
+  calcularCursoInfractor,
+  diasTranscurridos,
+  tierDe,
+  tipoInfraccionDe,
+  type TipoNotificacion,
+} from "@/lib/curso-infractores";
 import { formatCOP } from "@/lib/format";
 import { badgeClass, buttonClass } from "@/lib/ui";
 
@@ -24,23 +32,33 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
   const [multa, setMulta] = useState(0);
   const [tipo, setTipo] = useState<TipoNotificacion>("fisico");
   const [fecha, setFecha] = useState("");
-  // % que la organización suma encima del valor del curso (varía, se escribe a mano).
-  const [incrementoPct, setIncrementoPct] = useState(0);
+  // % que la organización suma encima del valor del curso: arranca en 28% (el margen
+  // de CEAPP) y se puede cambiar a mano. El saldo del SIMIT no cambia.
+  const [incrementoPct, setIncrementoPct] = useState(28);
 
   const dias = fecha ? diasTranscurridos(fecha) : null;
   const resultado = useMemo(() => {
     if (dias === null || !(multa > 0)) return null;
-    return calcularCursoInfractor({ multa, dias, tipo, porcentajeCurso });
+    return calcularCursoInfractor({
+      multa,
+      dias,
+      tipo,
+      porcentajeCurso,
+      valorCursoFijo: cursoFijoDe(tipoInfraccionDe(multa), tierDe(dias, tipo)),
+    });
   }, [multa, dias, tipo, porcentajeCurso]);
 
-  const incremento = resultado ? Math.round((resultado.valorCurso * incrementoPct) / 100) : 0;
+  // Con precio fijo por tipo  el valor ya incluye el margen: no lleva incremento %.
+  const tipoInfraccion = tipoInfraccionDe(multa) ?? "";
+  const precioFijo = !!resultado && cursoFijoDe(tipoInfraccion, resultado.tier) !== undefined;
+  const incremento = resultado && !precioFijo ? Math.round((resultado.valorCurso * incrementoPct) / 100) : 0;
 
   return (
     <div className="flex flex-col gap-5">
       <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">Valor de la multa</span>
+            <span className="font-medium text-slate-700">Valor a pagar multa</span>
             <input
               type="number"
               min={0}
@@ -129,7 +147,9 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
                 <p className="mt-1 text-xl font-semibold text-indigo-700">
                   {formatCOP(resultado.valorCurso + incremento)}
                 </p>
-                {incrementoPct > 0 ? (
+                {precioFijo ? (
+                  <p className="mt-1 text-xs text-indigo-500">Precio fijo del tipo {tipoInfraccion}</p>
+                ) : incrementoPct > 0 ? (
                   <p className="mt-1 text-xs text-indigo-500">
                     {formatCOP(resultado.valorCurso)} + {incrementoPct}% ({formatCOP(incremento)})
                   </p>
