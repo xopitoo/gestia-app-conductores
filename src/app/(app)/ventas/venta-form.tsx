@@ -19,6 +19,9 @@ import type {
 import { formatCOP } from "@/lib/format";
 import { buttonClass, linkClass } from "@/lib/ui";
 
+// Productos sin precio fijo: se agregan en $0 y el valor se escribe en el carrito.
+const ITEMS_VARIABLES = ["SOAT", "Curso de infractores"];
+
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600";
 
@@ -297,15 +300,17 @@ export function VentaForm({
   // habilita su precio para escribirlo a mano en el carrito (ver más abajo)
   // — a propósito no es un campo suelto siempre visible, para que no se
   // use por error sin haber agregado el ítem.
-  function agregarSoat() {
-    const next = [...items, { producto_id: null, nombre: "SOAT", precio: 0 }];
+  function agregarVariable(nombre: string) {
+    const next = [...items, { producto_id: null, nombre, precio: 0 }];
     setItems(next);
     if (tramitadorId) setPrecioTramitador(precioSugerido(tramitadorId, next));
     sumarCategoriasDetectadas(next);
   }
 
-  function esItemSoat(item: VentaItemInput) {
-    return item.producto_id === null && item.nombre === "SOAT";
+  // Ítems de valor variable (SOAT y curso de infractores): sin producto de catálogo, el valor se
+  // escribe a mano en el carrito y no se puede registrar la orden mientras siga en $0.
+  function esItemVariable(item: VentaItemInput) {
+    return item.producto_id === null && ITEMS_VARIABLES.includes(item.nombre);
   }
 
   function actualizarPrecioItem(index: number, precio: number) {
@@ -473,14 +478,17 @@ export function VentaForm({
           </details>
         ) : null}
 
-        <button
-          type="button"
-          onClick={agregarSoat}
-          className="flex items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50/40 px-3 py-2 text-left text-sm transition hover:border-amber-400 hover:bg-amber-50"
-        >
-          <span className="font-medium text-amber-900">SOAT (valor variable)</span>
-          <Plus className="h-4 w-4 shrink-0 text-amber-600" />
-        </button>
+        {ITEMS_VARIABLES.map((nombre) => (
+          <button
+            key={nombre}
+            type="button"
+            onClick={() => agregarVariable(nombre)}
+            className="flex items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50/40 px-3 py-2 text-left text-sm transition hover:border-amber-400 hover:bg-amber-50"
+          >
+            <span className="font-medium text-amber-900">{nombre} (valor variable)</span>
+            <Plus className="h-4 w-4 shrink-0 text-amber-600" />
+          </button>
+        ))}
       </section>
 
       <section className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
@@ -497,7 +505,7 @@ export function VentaForm({
               <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
                 <span className="truncate text-slate-700">{item.nombre}</span>
                 <div className="flex shrink-0 items-center gap-2">
-                  {esItemSoat(item) ? (
+                  {esItemVariable(item) ? (
                     <input
                       type="number"
                       min={0}
@@ -505,7 +513,7 @@ export function VentaForm({
                       autoFocus
                       value={item.precio || ""}
                       onChange={(e) => actualizarPrecioItem(i, Math.max(0, Number(e.target.value) || 0))}
-                      placeholder="Valor del SOAT"
+                      placeholder={`Valor: ${item.nombre}`}
                       className="w-32 rounded-md border border-amber-300 px-2 py-1 text-sm text-slate-900 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                     />
                   ) : (
@@ -768,16 +776,16 @@ export function VentaForm({
         </p>
       ) : null}
 
-      {items.some((item) => esItemSoat(item) && item.precio === 0) ? (
+      {items.some((item) => esItemVariable(item) && item.precio === 0) ? (
         <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          Falta el valor del SOAT.
+          Falta el valor de un producto de valor variable (SOAT o curso de infractores).
         </p>
       ) : null}
 
       <button
         type="submit"
-        disabled={pending || items.length === 0 || items.some((item) => esItemSoat(item) && item.precio === 0)}
+        disabled={pending || items.length === 0 || items.some((item) => esItemVariable(item) && item.precio === 0)}
         className={`mt-1 ${buttonClass("primary")} w-full`}
       >
         {pending ? "Registrando..." : `Registrar orden — ${formatCOP(totalNeto)}`}
