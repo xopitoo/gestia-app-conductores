@@ -211,12 +211,15 @@ export function Calculadora({ financiadoras }: { financiadoras: FinanciadoraRow[
               </label>
             </div>
 
-            {incrementoPct > 0 ? (
-              <p className="text-xs text-slate-500">
-                Incremento de {incrementoPct}% = {formatCOP(incremento)} sobre {formatCOP(monto)} — se financia{" "}
-                <span className="font-semibold text-slate-700">{formatCOP(montoFinanciado)}</span>.
-              </p>
-            ) : null}
+            <div className={`rounded-xl border-2 bg-white p-4 ${tema.borde}`}>
+              <p className="text-sm font-semibold text-slate-600">Valor a cobrar al cliente (lo que se financia)</p>
+              <p className={`mt-1 text-4xl font-bold ${tema.texto}`}>{formatCOP(montoFinanciado)}</p>
+              {incrementoPct > 0 ? (
+                <p className="mt-1 text-sm text-slate-500">
+                  {formatCOP(monto)} del producto + incremento de {incrementoPct}% ({formatCOP(incremento)})
+                </p>
+              ) : null}
+            </div>
 
             {filas.length > 0 ? (
               <>
