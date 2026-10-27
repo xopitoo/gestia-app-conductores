@@ -168,6 +168,16 @@ export function Calculadora({ porcentajeCurso }: { porcentajeCurso: number }) {
                   {formatCOP(resultado.saldoMulta)} + {formatCOP(ADICIONAL_PSE)} de adicional SIMIT
                 </p>
               </div>
+              <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-4 sm:col-span-2">
+                <p className="text-sm font-semibold text-indigo-700">Total a cobrar al cliente</p>
+                <p className="mt-1 text-4xl font-bold text-indigo-800">
+                  {formatCOP(resultado.valorCurso + incremento + resultado.saldoMulta + ADICIONAL_PSE)}
+                </p>
+                <p className="mt-1 text-sm text-indigo-600">
+                  Curso {formatCOP(resultado.valorCurso + incremento)} + saldo SIMIT{" "}
+                  {formatCOP(resultado.saldoMulta + ADICIONAL_PSE)}
+                </p>
+              </div>
             </div>
           )}
         </div>
