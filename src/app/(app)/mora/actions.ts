@@ -99,3 +99,42 @@ export async function agregarItem(
   revalidatePath("/dashboard");
   return {};
 }
+
+/**
+ * "Paz y salvo": cancela TODA la deuda pendiente de un cliente (ej. se llegó
+ * a un arreglo, o se da por incobrable) y lo saca de la mora. No toca los pagos
+ * ni la caja: a cada venta con saldo se le aplica un descuento por exactamente
+ * lo que falta (la misma herramienta de "Aplicar descuento"), así quedan
+ * 'pagada'. Solo admin; el saldo se recalcula acá en el servidor.
+ */
+export async function pazYSalvo(formData: FormData) {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") return;
+
+  const clienteId = String(formData.get("cliente_id") ?? "");
+  if (!clienteId) return;
+
+  const { data: ventas } = await supabase
+    .from("ventas")
+    .select("id, monto, descuento, incremento")
+    .eq("cliente_id", clienteId)
+    .neq("estado", "anulada");
+
+  for (const v of ventas ?? []) {
+    const { data: pagos } = await supabase.from("venta_pagos").select("monto").eq("venta_id", v.id);
+    const pagado = (pagos ?? []).reduce((acc, p) => acc + p.monto, 0);
+    const saldo = v.monto - v.descuento + v.incremento - pagado;
+    if (saldo <= 0) continue;
+
+    await supabase.rpc("aplicar_descuento_venta", {
+      p_venta_id: v.id,
+      p_descuento_tipo: "fijo",
+      p_descuento_valor: v.descuento + saldo,
+    });
+  }
+
+  revalidatePath("/mora");
+  revalidatePath("/ventas");
+  revalidatePath("/dashboard");
+  revalidatePath(`/clientes/${clienteId}/estado-cuenta`);
+}

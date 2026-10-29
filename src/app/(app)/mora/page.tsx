@@ -8,6 +8,8 @@ import { formatCOP } from "@/lib/format";
 import { buttonClass, linkClass } from "@/lib/ui";
 import { DescuentoForm } from "./descuento-form";
 import { AgregarItemForm } from "./agregar-item-form";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { pazYSalvo } from "./actions";
 
 export const metadata: Metadata = { title: "Clientes en mora | Gestia App Conductores" };
 
@@ -189,6 +191,17 @@ export default async function MoraPage({
                     <Link href={`/clientes/${c.clienteId}/estado-cuenta`} className={linkClass("primary")}>
                       Estado de cuenta
                     </Link>
+                    {esAdmin ? (
+                      <form action={pazYSalvo}>
+                        <input type="hidden" name="cliente_id" value={c.clienteId} />
+                        <ConfirmSubmitButton
+                          confirmMessage={`¿Dejar a ${cliente?.nombre_completo ?? "este cliente"} en paz y salvo? Se cancela toda su deuda pendiente (${formatCOP(c.totalSaldo)}) y sale de la mora. No se toca lo que ya pagó.`}
+                          className={buttonClass("success", "sm")}
+                        >
+                          Paz y salvo
+                        </ConfirmSubmitButton>
+                      </form>
+                    ) : null}
                     <span className="text-base font-semibold text-amber-600">{formatCOP(c.totalSaldo)}</span>
                   </div>
                 </div>
