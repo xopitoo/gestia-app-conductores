@@ -1,0 +1,2941 @@
+-- conductores-pos — esquema inicial multi-tenant
+-- Ejecutar en el SQL Editor del proyecto Supabase de conductores-pos (proyecto
+-- propio, separado del de CEAPP Aula Virtual — no comparten base de datos).
+
+create extension if not exists "pgcrypto";
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+-- =========================================================
+-- ORGANIZATIONS (una fila por escuela de conducción cliente)
+-- =========================================================
+create table if not exists public.organizations (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  active boolean not null default true,
+  -- Hash (pgcrypto/bcrypt) del PIN de autorización para ventas con menos
+  -- del 50% de pago inicial. null = todavía no lo configuró el admin, y
+  -- entonces ninguna venta por debajo del mínimo se puede crear. Nunca se
+  -- expone en texto plano ni se lee directo — ver verify_org_pin().
+  pin_hash text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- columna agregada después del v1 inicial: no rompe instalaciones ya
+-- corridas porque create table if not exists no toca tablas existentes.
+alter table public.organizations add column if not exists pin_hash text;
+
+drop trigger if exists organizations_set_updated_at on public.organizations;
+create trigger organizations_set_updated_at
+  before update on public.organizations
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- SEDES
+-- =========================================================
+create table if not exists public.sedes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  name text not null,
+  address text,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, name)
+);
+create index if not exists sedes_organization_id_idx on public.sedes (organization_id);
+
+drop trigger if exists sedes_set_updated_at on public.sedes;
+create trigger sedes_set_updated_at
+  before update on public.sedes
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- PROFILES (extiende auth.users)
+-- =========================================================
+create table if not exists public.profiles (
+  id uuid primary key references auth.users (id) on delete cascade,
+  organization_id uuid references public.organizations (id) on delete cascade,
+  sede_id uuid references public.sedes (id) on delete set null,
+  role text not null check (role in ('platform_owner', 'admin', 'recepcionista')),
+  full_name text not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  -- sede_id de un 'recepcionista' puede quedar en null temporalmente: el
+  -- usuario la autoasigna la primera vez que entra (ver /elegir-sede),
+  -- no hace falta que el admin la fije al crear la cuenta.
+  constraint profiles_role_scope_chk check (
+    (role = 'platform_owner' and organization_id is null and sede_id is null)
+    or (role = 'admin' and organization_id is not null)
+    or (role = 'recepcionista' and organization_id is not null)
+  )
+);
+create index if not exists profiles_organization_id_idx on public.profiles (organization_id);
+create index if not exists profiles_sede_id_idx on public.profiles (sede_id);
+
+-- =========================================================
+-- CLIENTES
+-- =========================================================
+create table if not exists public.clientes (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  tipo_documento text not null check (tipo_documento in ('CC', 'TI', 'CE', 'PPT', 'PASAPORTE', 'NIT')),
+  numero_documento text not null,
+  nombre_completo text not null,
+  sexo text check (sexo in ('M', 'F', 'OTRO')),
+  fecha_nacimiento date,
+  telefono_pais text not null default '+57',
+  telefono text,
+  correo_electronico text,
+  -- Placeholder para biométricos (fase 2, sin integración de hardware todavía).
+  -- La UI muestra "{fingerprints_enrolled}/2" igual que el producto de referencia.
+  fingerprints_enrolled int not null default 0 check (fingerprints_enrolled >= 0),
+  -- Si el cliente ya está inscrito en el RUNT (Registro Único Nacional de
+  -- Tránsito). Lo fija el recepcionista al crear el cliente; luego, como
+  -- cualquier otro campo de clientes, solo el admin puede corregirlo.
+  runt boolean not null default false,
+  active boolean not null default true,
+  created_by uuid references public.profiles (id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, tipo_documento, numero_documento)
+);
+alter table public.clientes add column if not exists runt boolean not null default false;
+
+-- Vencimiento de licencia — dos fechas separadas porque un mismo cliente
+-- puede tener categorías particulares (A1/A2/B1/B2/B3) y públicas
+-- (C1/C2/C3) con vigencias distintas (ver
+-- actualizar_vencimiento_licencia). Se recalculan solas cada vez que se
+-- registra una venta de un curso/renovación con esas categorías — nunca
+-- se editan a mano.
+alter table public.clientes add column if not exists licencia_particular_vence date;
+alter table public.clientes add column if not exists licencia_publico_vence date;
+
+create index if not exists clientes_organization_id_idx on public.clientes (organization_id);
+create index if not exists clientes_sede_id_idx on public.clientes (sede_id);
+
+drop trigger if exists clientes_set_updated_at on public.clientes;
+create trigger clientes_set_updated_at
+  before update on public.clientes
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- PRODUCTOS (catálogo compartido por toda la organización — no por
+-- sede: los mismos cursos/trámites se ofrecen en cualquier sucursal)
+-- =========================================================
+create table if not exists public.productos (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  nombre text not null,
+  descripcion text,
+  precio numeric(12, 2) not null check (precio >= 0),
+  categoria text check (categoria in ('multiple', 'individual')),
+  active boolean not null default true,
+  created_by uuid references public.profiles (id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists productos_organization_id_idx on public.productos (organization_id);
+
+-- null = visible para todas las sedes de la organización (así quedan los
+-- productos ya cargados); con un valor, el producto solo aparece al
+-- registrar una venta/cotización en esa sede puntual — para catálogos que
+-- no tienen nada que ver entre sí (ej. cursos de conducción vs. exámenes
+-- médicos de otra sede).
+alter table public.productos add column if not exists sede_id uuid references public.sedes (id) on delete cascade;
+create index if not exists productos_sede_id_idx on public.productos (sede_id);
+
+drop trigger if exists productos_set_updated_at on public.productos;
+create trigger productos_set_updated_at
+  before update on public.productos
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- TRAMITADORES (asesores externos que revenden el servicio — cobran lo que
+-- quieren al cliente final, pero le deben a la organización un "precio
+-- especial" fijo por cada persona que traen, ej. en un centro médico). null
+-- en sede_id = visible en toda la organización, igual que productos.sede_id.
+-- `precio_especial` se copia a `ventas.precio_tramitador` al elegirlo en una
+-- venta, pero se puede ajustar caso por caso ahí ("180.000 o 180.000 más").
+--
+-- La venta se registra siempre por el valor COMPLETO que paga el cliente
+-- (ej. $300.000) — precio_tramitador es solo cuánto de eso le corresponde
+-- a la organización ($180.000); la diferencia es la ganancia del
+-- tramitador, y nunca se guarda aparte (se calcula: total - precio_tramitador).
+--
+-- El saldo a favor del tramitador se cruza con el efectivo real: es lo que
+-- ya pagaron sus clientes (venta_pagos) menos el precio especial acumulado
+-- de TODAS sus ventas no anuladas (haya pagado el cliente o no — la
+-- organización se cobra primero, y lo que sobra del efectivo recaudado es
+-- del tramitador), menos lo que ya se le pagó a él. Si un cliente suyo
+-- todavía debe, ese cobro pendiente queda como riesgo del tramitador, no
+-- de la organización.
+-- =========================================================
+create table if not exists public.tramitadores (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid references public.sedes (id) on delete cascade,
+  nombre text not null,
+  precio_especial numeric(12, 2) not null default 0 check (precio_especial >= 0),
+  active boolean not null default true,
+  created_by uuid references public.profiles (id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists tramitadores_organization_id_idx on public.tramitadores (organization_id);
+create index if not exists tramitadores_sede_id_idx on public.tramitadores (sede_id);
+
+drop trigger if exists tramitadores_set_updated_at on public.tramitadores;
+create trigger tramitadores_set_updated_at
+  before update on public.tramitadores
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- TRAMITADOR_PAGOS: registro (inmutable, solo insert) de cada pago que la
+-- organización le hace a un tramitador (su saldo a favor). El saldo nunca
+-- se guarda aparte — siempre se recalcula en vivo (ver fórmula arriba).
+-- =========================================================
+create table if not exists public.tramitador_pagos (
+  id uuid primary key default gen_random_uuid(),
+  tramitador_id uuid not null references public.tramitadores (id) on delete cascade,
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid references public.sedes (id) on delete set null,
+  monto numeric(12, 2) not null check (monto > 0),
+  nota text,
+  created_by uuid not null references public.profiles (id),
+  created_at timestamptz not null default now()
+);
+create index if not exists tramitador_pagos_tramitador_id_idx on public.tramitador_pagos (tramitador_id);
+create index if not exists tramitador_pagos_organization_id_idx on public.tramitador_pagos (organization_id);
+
+-- Enlaza un tramitador_pagos generado por un cruce (cruzar_saldo_tramitador
+-- / tramitador_cruce_automatico) con el venta_pagos 'cruce_tramitador' que
+-- insertó al mismo tiempo — null en pagos de comisión reales (esos no
+-- vienen de ninguna venta puntual). Con este vínculo, si la venta que le
+-- dio origen al crédito se anula después, tramitador_revertir_credito_negativo
+-- puede deshacer exactamente ese cruce (y solo ese) en vez de adivinar.
+alter table public.tramitador_pagos add column if not exists venta_pago_id uuid references public.venta_pagos (id) on delete set null;
+
+-- =========================================================
+-- TRAMITADOR_PRECIOS: precio especial de un tramitador para un producto
+-- puntual (ej. un tramitador puede tener $150.000 para "Examen 1
+-- categoría" y $250.000 para "Examen 2 categorías" — no es un solo valor
+-- fijo por tramitador). Si al armar una venta el/los producto(s) elegidos
+-- tienen un precio acá para el tramitador seleccionado, se precarga solo;
+-- si no hay ninguno, se usa tramitadores.precio_especial como respaldo.
+-- =========================================================
+create table if not exists public.tramitador_precios (
+  id uuid primary key default gen_random_uuid(),
+  tramitador_id uuid not null references public.tramitadores (id) on delete cascade,
+  producto_id uuid not null references public.productos (id) on delete cascade,
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  precio_especial numeric(12, 2) not null check (precio_especial >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists tramitador_precios_tramitador_producto_key
+  on public.tramitador_precios (tramitador_id, producto_id);
+create index if not exists tramitador_precios_tramitador_id_idx on public.tramitador_precios (tramitador_id);
+create index if not exists tramitador_precios_producto_id_idx on public.tramitador_precios (producto_id);
+
+drop trigger if exists tramitador_precios_set_updated_at on public.tramitador_precios;
+create trigger tramitador_precios_set_updated_at
+  before update on public.tramitador_precios
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- VENTAS (encabezado de la orden — total y estado de cobro). `concepto` y
+-- `monto` se derivan de sus venta_items (varios productos por venta); los
+-- métodos y montos realmente pagados viven en venta_pagos, porque una
+-- venta puede cobrarse en más de un método y/o en más de un momento
+-- (abonos) — ver el README para el detalle de este modelo.
+-- =========================================================
+create table if not exists public.ventas (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  cliente_id uuid not null references public.clientes (id) on delete restrict,
+  concepto text not null,
+  monto numeric(12, 2) not null check (monto > 0),
+  estado text not null default 'pagada' check (estado in ('pagada', 'abonada', 'anulada')),
+  vendedor_id uuid not null references public.profiles (id),
+  -- Persona externa (no es un usuario del sistema) que refirió al cliente,
+  -- para comisión/seguimiento — texto libre, opcional.
+  referido_nombre text,
+  -- Descuento en pesos ya aplicado sobre `monto` (bruto, suma de
+  -- venta_items). Lo que realmente hay que cobrar/queda pendiente siempre
+  -- es `monto - descuento + incremento` (ver esa columna más abajo). Se
+  -- puede fijar al crear la venta (recepcionista o admin) o después, desde
+  -- /admin/mora (solo admin) — ver registrar_venta / aplicar_descuento_venta.
+  descuento numeric(12, 2) not null default 0 check (descuento >= 0),
+  -- Incremento en pesos ya aplicado sobre `monto` (ej. el % que cobran de
+  -- más Brilla/Addi/Sistecrédito por financiar la compra) — lo opuesto al
+  -- descuento. Lo que realmente hay que cobrar/queda pendiente siempre es
+  -- `monto - descuento + incremento`. Solo se fija al crear la venta (no
+  -- es editable después, a diferencia del descuento) — ver registrar_venta.
+  -- Solo tiene sentido en las sedes CEAPP (Valorar no lo usa).
+  incremento numeric(12, 2) not null default 0 check (incremento >= 0),
+  -- Certificado RUNT: para una auditoría, toda venta ya paga por completo
+  -- debe tener el certificado subido — lo sube el recepcionista (de su
+  -- propia sede) o un admin, nunca antes de que el saldo llegue a cero. Es
+  -- un hecho de una sola vía, no se "des-sube" desde la UI — ver
+  -- registrar_certificado_runt(). El archivo en sí vive en el bucket de
+  -- Storage `certificados-runt`, `certificado_path` es su ruta ahí.
+  certificado boolean not null default false,
+  certificado_at timestamptz,
+  certificado_by uuid references public.profiles (id),
+  certificado_path text,
+  created_by uuid not null references public.profiles (id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists ventas_organization_id_idx on public.ventas (organization_id);
+create index if not exists ventas_sede_id_idx on public.ventas (sede_id);
+create index if not exists ventas_created_at_idx on public.ventas (created_at);
+create index if not exists ventas_vendedor_id_idx on public.ventas (vendedor_id);
+create index if not exists ventas_tramitador_id_idx on public.ventas (tramitador_id);
+alter table public.ventas add column if not exists referido_nombre text;
+alter table public.ventas add column if not exists descuento numeric(12, 2) not null default 0;
+alter table public.ventas drop constraint if exists ventas_descuento_chk;
+alter table public.ventas add constraint ventas_descuento_chk check (descuento >= 0);
+alter table public.ventas add column if not exists incremento numeric(12, 2) not null default 0;
+alter table public.ventas drop constraint if exists ventas_incremento_chk;
+alter table public.ventas add constraint ventas_incremento_chk check (incremento >= 0);
+alter table public.ventas add column if not exists certificado boolean not null default false;
+alter table public.ventas add column if not exists certificado_at timestamptz;
+alter table public.ventas add column if not exists certificado_by uuid references public.profiles (id);
+alter table public.ventas add column if not exists certificado_path text;
+-- Categorías de licencia que esta venta certifica/renueva (ej. '{A2,C1}')
+-- — auto-detectadas del nombre de los productos en las sedes CEAPP
+-- (cursos ya se llaman "A2 Cali 2026", etc.), elegidas a mano en C.R.C.
+-- Valorar (sus productos son "Examen 1/2 categoría", no dicen la
+-- categoría). Alimenta actualizar_vencimiento_licencia — null/vacío si la
+-- venta no tiene nada que ver con una licencia (ej. solo una impresión).
+alter table public.ventas add column if not exists categorias_licencia text[];
+-- Tramitador formal (de la tabla tramitadores) — reemplaza al uso de
+-- referido_nombre como texto libre para los casos que sí llevan un precio
+-- especial. referido_nombre se mantiene para historial y para referidos
+-- sin tarifa (ej. otro cliente que recomendó, sin nada de por medio).
+-- precio_tramitador es cuánto de esta venta le corresponde a la
+-- organización (no lo que gana el tramitador — ver comentario en la
+-- definición de la tabla tramitadores más arriba).
+alter table public.ventas add column if not exists tramitador_id uuid references public.tramitadores (id) on delete set null;
+alter table public.ventas add column if not exists precio_tramitador numeric(12, 2) not null default 0;
+alter table public.ventas drop constraint if exists ventas_precio_tramitador_chk;
+alter table public.ventas add constraint ventas_precio_tramitador_chk check (precio_tramitador >= 0);
+
+-- Bucket privado para los certificados RUNT subidos (nunca público — se
+-- accede siempre con signed URLs de corta duración, generadas en el
+-- servidor). Las políticas de storage.objects de abajo son el único modo de
+-- leer/escribir ahí.
+insert into storage.buckets (id, name, public)
+values ('certificados-runt', 'certificados-runt', false)
+on conflict (id) do nothing;
+-- `categoria` y `producto_id` vivían acá en la v1 de un solo producto por
+-- venta; ahora que una venta puede tener varios productos, esos datos
+-- viven por ítem en venta_items. `metodo_pago` vivía acá en la v1 de un
+-- solo método por venta; ahora vive por pago en venta_pagos. Se quitan si
+-- quedaron de una instalación previa (no rompe nada correr esto de nuevo).
+alter table public.ventas drop column if exists categoria;
+alter table public.ventas drop column if exists producto_id;
+alter table public.ventas drop column if exists metodo_pago;
+alter table public.ventas drop constraint if exists ventas_estado_check;
+alter table public.ventas add constraint ventas_estado_check check (estado in ('pagada', 'abonada', 'anulada'));
+
+drop trigger if exists ventas_set_updated_at on public.ventas;
+create trigger ventas_set_updated_at
+  before update on public.ventas
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- VENTA_ITEMS (línea por producto dentro de una venta — inmutable, igual
+-- que caja_movimientos: se crean todas juntas con registrar_venta, no se
+-- editan después)
+-- =========================================================
+create table if not exists public.venta_items (
+  id uuid primary key default gen_random_uuid(),
+  venta_id uuid not null references public.ventas (id) on delete cascade,
+  -- organization_id / sede_id desnormalizados a propósito, mismo motivo
+  -- que en caja_movimientos: cada policy de RLS filtra directo, sin join.
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  producto_id uuid references public.productos (id) on delete set null,
+  nombre text not null,
+  precio numeric(12, 2) not null check (precio >= 0),
+  created_at timestamptz not null default now()
+);
+create index if not exists venta_items_venta_id_idx on public.venta_items (venta_id);
+create index if not exists venta_items_organization_id_idx on public.venta_items (organization_id);
+create index if not exists venta_items_sede_id_idx on public.venta_items (sede_id);
+
+-- =========================================================
+-- VENTA_PAGOS (un registro por método usado en cada momento de pago —
+-- inmutable, igual que venta_items/caja_movimientos. Varias filas con el
+-- mismo venta_id = abonos sucesivos; varias filas del mismo momento =
+-- pago dividido en métodos, ej. mitad efectivo mitad tarjeta)
+-- =========================================================
+create table if not exists public.venta_pagos (
+  id uuid primary key default gen_random_uuid(),
+  venta_id uuid not null references public.ventas (id) on delete cascade,
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  monto numeric(12, 2) not null check (monto > 0),
+  metodo_pago text not null check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro', 'cruce_tramitador')),
+  created_by uuid not null references public.profiles (id),
+  created_at timestamptz not null default now()
+);
+-- 'cruce_tramitador' = no es plata real entrando a caja: es un pago que se
+-- salda contra el saldo a favor que la organización ya le debía al
+-- tramitador (ver cruzar_saldo_tramitador más abajo) — por eso nunca genera
+-- un caja_movimientos.
+alter table public.venta_pagos drop constraint if exists venta_pagos_metodo_pago_check;
+alter table public.venta_pagos
+  add constraint venta_pagos_metodo_pago_check
+  check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro', 'cruce_tramitador'));
+
+-- Rastro de auditoría de corregir_forma_pago_venta (más abajo) — venta_pagos
+-- sigue siendo un registro inmutable para todo lo demás (monto, venta_id,
+-- etc.), pero corregir el método de pago sí queda permitido y con rastro de
+-- quién y cuándo, para no perder trazabilidad en un sistema de dinero.
+alter table public.venta_pagos add column if not exists metodo_pago_editado_por uuid references public.profiles (id);
+alter table public.venta_pagos add column if not exists metodo_pago_editado_at timestamptz;
+-- Foto/captura del comprobante (transferencia, Nequi, Addi, Brilla,
+-- Sistecrédito, etc.) — opcional, en el bucket privado
+-- `comprobantes-pago`. Se completa al crear el pago (ver
+-- registrar_venta/registrar_abono/registrar_abono_tramitador/
+-- convertir_cotizacion): venta_pagos es inmutable, así que esto entra ya
+-- con el insert, no se agrega después.
+alter table public.venta_pagos add column if not exists comprobante_path text;
+
+create index if not exists venta_pagos_venta_id_idx on public.venta_pagos (venta_id);
+create index if not exists venta_pagos_organization_id_idx on public.venta_pagos (organization_id);
+create index if not exists venta_pagos_sede_id_idx on public.venta_pagos (sede_id);
+
+-- =========================================================
+-- Bucket privado para los comprobantes de pago (transferencia, Nequi,
+-- Addi, Brilla, Sistecrédito, etc.) — nunca público, se accede siempre con
+-- signed URLs de corta duración generadas en el servidor. A diferencia de
+-- certificados-runt, la ruta acá es "<organization_id>/<uuid>.<ext>" (no
+-- "<org>/<venta_id>/...") porque el pago se sube ANTES de que exista la
+-- venta en algunos casos (registrar_venta crea todo en una sola
+-- transacción) — el vínculo real vive en venta_pagos.comprobante_path,
+-- no en la ruta del archivo. Solo INSERT y SELECT: como el resto de los
+-- registros de pago, es de una sola vía.
+-- =========================================================
+insert into storage.buckets (id, name, public)
+values ('comprobantes-pago', 'comprobantes-pago', false)
+on conflict (id) do nothing;
+
+drop policy if exists "comprobantes_pago_insert" on storage.objects;
+create policy "comprobantes_pago_insert" on storage.objects
+  for insert
+  with check (
+    bucket_id = 'comprobantes-pago'
+    and (storage.foldername(name))[1] = public.current_org_id()::text
+    and public.current_role() in ('admin', 'recepcionista')
+  );
+
+drop policy if exists "comprobantes_pago_select" on storage.objects;
+create policy "comprobantes_pago_select" on storage.objects
+  for select
+  using (
+    bucket_id = 'comprobantes-pago'
+    and (storage.foldername(name))[1] = public.current_org_id()::text
+    and public.current_role() in ('admin', 'recepcionista')
+  );
+
+-- =========================================================
+-- COTIZACIONES (borrador de una venta: mismo cliente + productos, sin
+-- caja ni pago todavía. Se convierte en una venta real cuando el cliente
+-- acepta — `venta_id` queda seteado en ese momento. A diferencia de
+-- ventas, SÍ se puede editar/rechazar libremente mientras está
+-- 'pendiente', porque todavía no hay plata de por medio.)
+-- =========================================================
+create table if not exists public.cotizaciones (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  cliente_id uuid not null references public.clientes (id) on delete restrict,
+  concepto text not null,
+  monto numeric(12, 2) not null check (monto > 0),
+  estado text not null default 'pendiente' check (estado in ('pendiente', 'convertida', 'rechazada')),
+  referido_nombre text,
+  valida_hasta date,
+  vendedor_id uuid not null references public.profiles (id),
+  venta_id uuid references public.ventas (id) on delete set null,
+  created_by uuid not null references public.profiles (id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists cotizaciones_organization_id_idx on public.cotizaciones (organization_id);
+create index if not exists cotizaciones_sede_id_idx on public.cotizaciones (sede_id);
+create index if not exists cotizaciones_created_at_idx on public.cotizaciones (created_at);
+
+drop trigger if exists cotizaciones_set_updated_at on public.cotizaciones;
+create trigger cotizaciones_set_updated_at
+  before update on public.cotizaciones
+  for each row execute function public.set_updated_at();
+
+create table if not exists public.cotizacion_items (
+  id uuid primary key default gen_random_uuid(),
+  cotizacion_id uuid not null references public.cotizaciones (id) on delete cascade,
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  producto_id uuid references public.productos (id) on delete set null,
+  nombre text not null,
+  precio numeric(12, 2) not null check (precio >= 0),
+  created_at timestamptz not null default now()
+);
+create index if not exists cotizacion_items_cotizacion_id_idx on public.cotizacion_items (cotizacion_id);
+create index if not exists cotizacion_items_organization_id_idx on public.cotizacion_items (organization_id);
+
+-- =========================================================
+-- CAJA_SESIONES (un ciclo abrir/cerrar por sede)
+-- =========================================================
+create table if not exists public.caja_sesiones (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  opened_by uuid not null references public.profiles (id),
+  opened_at timestamptz not null default now(),
+  closed_by uuid references public.profiles (id),
+  closed_at timestamptz,
+  opening_balance numeric(12, 2) not null default 0,
+  closing_balance numeric(12, 2),
+  estado text not null default 'abierta' check (estado in ('abierta', 'cerrada')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists caja_sesiones_organization_id_idx on public.caja_sesiones (organization_id);
+create index if not exists caja_sesiones_sede_id_idx on public.caja_sesiones (sede_id);
+
+-- Invariante dura: como máximo una sesión ABIERTA por sede, forzado por
+-- Postgres (no por la app) via índice único parcial.
+drop index if exists caja_sesiones_one_open_per_sede;
+create unique index caja_sesiones_one_open_per_sede
+  on public.caja_sesiones (sede_id)
+  where estado = 'abierta';
+
+drop trigger if exists caja_sesiones_set_updated_at on public.caja_sesiones;
+create trigger caja_sesiones_set_updated_at
+  before update on public.caja_sesiones
+  for each row execute function public.set_updated_at();
+
+-- =========================================================
+-- CAJA_MOVIMIENTOS (libro contable inmutable dentro de una sesión)
+-- =========================================================
+create table if not exists public.caja_movimientos (
+  id uuid primary key default gen_random_uuid(),
+  caja_sesion_id uuid not null references public.caja_sesiones (id) on delete cascade,
+  -- organization_id / sede_id desnormalizados a propósito: cada policy de RLS
+  -- filtra directo sobre esta tabla sin necesitar un subquery/join.
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  sede_id uuid not null references public.sedes (id) on delete restrict,
+  tipo text not null check (tipo in ('ingreso', 'egreso')),
+  concepto text not null,
+  monto numeric(12, 2) not null check (monto > 0),
+  metodo_pago text check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'otro')),
+  venta_id uuid references public.ventas (id) on delete set null,
+  created_by uuid not null references public.profiles (id),
+  created_at timestamptz not null default now()
+);
+-- Liga este movimiento al venta_pago puntual que lo generó (uno de los
+-- pagos de la venta, no la venta entera) — así corregir_forma_pago_venta
+-- sabe exactamente qué movimiento de caja actualizar en vez de adivinar
+-- por monto/fecha. Nullable: los movimientos que no vienen de un pago de
+-- venta (egresos manuales, o filas creadas antes de esta columna) no
+-- tienen uno.
+alter table public.caja_movimientos add column if not exists venta_pago_id uuid references public.venta_pagos (id) on delete set null;
+alter table public.caja_movimientos drop constraint if exists caja_movimientos_metodo_pago_check;
+alter table public.caja_movimientos
+  add constraint caja_movimientos_metodo_pago_check
+  check (metodo_pago in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro'));
+
+-- Mismo criterio que venta_pago_id: liga el movimiento de caja al pago del
+-- tramitador que lo generó — un ingreso cuando el tramitador paga lo que
+-- debe (registrar_abono_tramitador), un egreso cuando la organización le
+-- paga su comisión (registrar_comision_tramitador). Nullable: la mayoría
+-- de los movimientos no vienen de un tramitador.
+alter table public.caja_movimientos add column if not exists tramitador_id uuid references public.tramitadores (id) on delete set null;
+alter table public.caja_movimientos add column if not exists tramitador_pago_id uuid references public.tramitador_pagos (id) on delete set null;
+create index if not exists caja_movimientos_tramitador_id_idx on public.caja_movimientos (tramitador_id);
+
+create index if not exists caja_movimientos_caja_sesion_id_idx on public.caja_movimientos (caja_sesion_id);
+create index if not exists caja_movimientos_organization_id_idx on public.caja_movimientos (organization_id);
+create index if not exists caja_movimientos_sede_id_idx on public.caja_movimientos (sede_id);
+create index if not exists caja_movimientos_created_at_idx on public.caja_movimientos (created_at);
+create index if not exists caja_movimientos_venta_pago_id_idx on public.caja_movimientos (venta_pago_id);
+
+create or replace function public.enforce_open_caja_session()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_estado text;
+begin
+  select estado into v_estado from public.caja_sesiones where id = new.caja_sesion_id;
+  if v_estado is distinct from 'abierta' then
+    raise exception 'No se puede registrar un movimiento en una caja cerrada';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists caja_movimientos_require_open_session on public.caja_movimientos;
+create trigger caja_movimientos_require_open_session
+  before insert on public.caja_movimientos
+  for each row execute function public.enforce_open_caja_session();
+
+-- =========================================================
+-- LOGIN_ATTEMPTS: registro de intentos de inicio de sesión, para frenar
+-- fuerza bruta. Se llena únicamente desde record_login_attempt /
+-- check_login_lockout (más abajo, ambas security definer) — nadie lee ni
+-- escribe la tabla directo (sin policies de RLS a propósito), ni siquiera
+-- un admin, para no exponer quién intentó entrar a qué cuenta.
+-- =========================================================
+create table if not exists public.login_attempts (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  success boolean not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists login_attempts_email_created_at_idx
+  on public.login_attempts (lower(email), created_at desc);
+
+alter table public.login_attempts enable row level security;
+
+-- =========================================================
+-- HELPERS DE RLS (security definer, evitan recursión de RLS al
+-- consultar profiles desde dentro de sus propias policies)
+-- =========================================================
+create or replace function public.current_org_id()
+returns uuid
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select organization_id from public.profiles where id = auth.uid() and active = true;
+$$;
+
+create or replace function public.current_role()
+returns text
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select role from public.profiles where id = auth.uid() and active = true;
+$$;
+
+create or replace function public.current_sede_id()
+returns uuid
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select sede_id from public.profiles where id = auth.uid() and active = true;
+$$;
+
+create or replace function public.is_platform_owner()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select coalesce(
+    (select role = 'platform_owner' from public.profiles where id = auth.uid() and active = true),
+    false
+  );
+$$;
+
+-- =========================================================
+-- LOCKOUT DE LOGIN: 5 intentos fallidos seguidos (sin un login exitoso
+-- de por medio) en los últimos 15 minutos bloquean nuevos intentos para
+-- ese email. check_login_lockout se llama ANTES de intentar el login
+-- (así ni siquiera se gasta un intento contra Supabase Auth mientras está
+-- bloqueado); record_login_attempt se llama DESPUÉS, con el resultado.
+-- Case-insensitive porque Supabase Auth también lo es. security definer
+-- porque login_attempts no tiene policies (nadie la lee/escribe directo);
+-- se puede llamar sin sesión (rol anon) porque no hay grants explícitos
+-- que lo impidan — Postgres da EXECUTE a PUBLIC por default.
+-- =========================================================
+create or replace function public.check_login_lockout(p_email text)
+returns jsonb
+language plpgsql
+security definer
+stable
+set search_path = public
+as $$
+declare
+  v_last_success timestamptz;
+  v_failed_count int;
+  v_oldest_failed timestamptz;
+begin
+  select max(created_at) into v_last_success
+  from public.login_attempts
+  where lower(email) = lower(p_email) and success = true;
+
+  select count(*), min(created_at)
+  into v_failed_count, v_oldest_failed
+  from public.login_attempts
+  where lower(email) = lower(p_email)
+    and success = false
+    and created_at > now() - interval '15 minutes'
+    and created_at > coalesce(v_last_success, '-infinity'::timestamptz);
+
+  if v_failed_count >= 5 then
+    return jsonb_build_object(
+      'locked', true,
+      'retry_after_seconds', greatest(
+        0,
+        extract(epoch from (v_oldest_failed + interval '15 minutes' - now()))::int
+      )
+    );
+  end if;
+
+  return jsonb_build_object('locked', false);
+end;
+$$;
+
+create or replace function public.record_login_attempt(p_email text, p_success boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.login_attempts (email, success)
+  values (p_email, p_success);
+
+  -- Poda oportunista para que la tabla no crezca para siempre — no hace
+  -- falta un cron aparte, con limpiar un poco en cada intento alcanza.
+  delete from public.login_attempts
+  where created_at < now() - interval '1 day';
+end;
+$$;
+
+-- =========================================================
+-- PIN DE AUTORIZACIÓN (ventas con menos del 50% de pago inicial). Se
+-- hashea con pgcrypto (bcrypt) — set_org_pin es la única forma de
+-- escribirlo, verify_org_pin la única de leerlo, y nunca devuelve el hash
+-- en sí: ni admin ni recepcionista pueden ver el PIN de otro, solo
+-- confirmar si el que tipeó un recepcionista es correcto.
+-- =========================================================
+create or replace function public.set_org_pin(p_pin text)
+returns void
+language plpgsql
+security definer
+-- crypt()/gen_salt() (pgcrypto) viven en el esquema `extensions` en
+-- Supabase, no en `public` — hay que incluirlo acá.
+set search_path = public, extensions
+as $$
+begin
+  -- "is distinct from", no "<>": current_role() puede dar null (ej. si
+  -- alguna vez se llama sin sesión de usuario real) y "null <> 'admin'"
+  -- es null, no true, así que "if" no dispara y el chequeo se saltea.
+  if public.current_role() is distinct from 'admin' then
+    raise exception 'No autorizado';
+  end if;
+  if p_pin is null or length(p_pin) < 4 then
+    raise exception 'El PIN debe tener al menos 4 caracteres';
+  end if;
+  update public.organizations
+  set pin_hash = crypt(p_pin, gen_salt('bf'))
+  where id = public.current_org_id();
+end;
+$$;
+
+create or replace function public.verify_org_pin(p_pin text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public, extensions
+as $$
+  select coalesce(
+    (
+      select pin_hash = crypt(p_pin, pin_hash)
+      from public.organizations
+      where id = public.current_org_id() and pin_hash is not null
+    ),
+    false
+  );
+$$;
+
+-- =========================================================
+-- ACTUALIZAR_VENCIMIENTO_LICENCIA: recalcula la fecha de vencimiento de
+-- licencia de un cliente cuando una venta certifica/renueva categorías
+-- particulares (A1/A2/B1/B2/B3) y/o públicas (C1/C2/C3). Vigencias fijadas
+-- por el usuario (regulación colombiana):
+--   Particular: <60 años = 10 años, 60-80 = 5 años, >80 = 1 año.
+--   Público:    <60 años = 3 años,  60+   = 1 año.
+-- La edad se calcula con fecha_nacimiento del cliente A LA FECHA DE LA
+-- VENTA (no la edad actual). Nunca se edita a mano — solo la toca esta
+-- función, llamada desde registrar_venta.
+-- =========================================================
+create or replace function public.actualizar_vencimiento_licencia(
+  p_cliente_id uuid,
+  p_categorias text[],
+  p_fecha_venta date
+)
+returns void
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_nacimiento date;
+  v_edad int;
+  v_categorias text[];
+  v_tiene_particular boolean;
+  v_tiene_publico boolean;
+  v_vigencia_particular int;
+  v_vigencia_publico int;
+begin
+  if p_categorias is null or array_length(p_categorias, 1) is null then
+    return;
+  end if;
+
+  select fecha_nacimiento into v_nacimiento from public.clientes where id = p_cliente_id;
+  if v_nacimiento is null then
+    return;
+  end if;
+
+  select array_agg(upper(c)) into v_categorias from unnest(p_categorias) as c;
+
+  v_edad := extract(year from age(p_fecha_venta, v_nacimiento));
+
+  v_tiene_particular := v_categorias && array['A1', 'A2', 'B1', 'B2', 'B3'];
+  v_tiene_publico := v_categorias && array['C1', 'C2', 'C3'];
+
+  if v_tiene_particular then
+    v_vigencia_particular := case
+      when v_edad < 60 then 10
+      when v_edad <= 80 then 5
+      else 1
+    end;
+    update public.clientes
+    set licencia_particular_vence = (p_fecha_venta + (v_vigencia_particular || ' years')::interval)::date
+    where id = p_cliente_id;
+  end if;
+
+  if v_tiene_publico then
+    v_vigencia_publico := case when v_edad < 60 then 3 else 1 end;
+    update public.clientes
+    set licencia_publico_vence = (p_fecha_venta + (v_vigencia_publico || ' years')::interval)::date
+    where id = p_cliente_id;
+  end if;
+end;
+$$;
+
+-- =========================================================
+-- REGISTRAR_VENTA: escritura atómica de una orden con VARIOS productos —
+-- venta + venta_items (uno por producto) + movimiento de caja. security
+-- invoker: sigue pasando por las policies normales de abajo, solo
+-- garantiza que todas las filas se creen juntas o ninguna.
+--
+-- p_items: jsonb array {"producto_id": uuid|null, "nombre": text,
+-- "precio": numeric} — uno por producto elegido. p_pagos: jsonb array
+-- {"monto": numeric, "metodo_pago": text} — uno por método usado en este
+-- momento (puede ser menos del total: la venta queda 'abonada'). Si lo
+-- pagado ahora es menos del 50% del total NETO (ya con descuento), exige
+-- p_pin correcto. p_descuento_tipo: 'porcentaje' | 'fijo' | null — lo puede
+-- fijar cualquier vendedor al registrar la orden (a diferencia de
+-- aplicar_descuento_venta, que es solo-admin y edita una venta existente).
+-- =========================================================
+-- Postgres identifica funciones por nombre + tipos de argumentos: cambiar
+-- la firma no "reemplaza" ninguna versión anterior — hay que borrarlas a
+-- mano para no dejar overloads viejos (PostgREST no sabe elegir cuál usar
+-- si queda más de uno).
+drop function if exists public.registrar_venta(uuid, uuid, text, text, numeric, text, uuid);
+drop function if exists public.registrar_venta(uuid, uuid, text, text, numeric, text, uuid, uuid);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, text, uuid);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric, text[]);
+drop function if exists public.registrar_venta(uuid, uuid, jsonb, jsonb, uuid, text, text, text, numeric, uuid, numeric, text[], text, numeric);
+
+create or replace function public.registrar_venta(
+  p_sede_id uuid,
+  p_cliente_id uuid,
+  p_items jsonb,
+  p_pagos jsonb,
+  p_vendedor_id uuid,
+  p_pin text default null,
+  p_referido_nombre text default null,
+  p_descuento_tipo text default null,
+  p_descuento_valor numeric default 0,
+  p_tramitador_id uuid default null,
+  p_precio_tramitador numeric default 0,
+  p_categorias_licencia text[] default null,
+  p_incremento_tipo text default null,
+  p_incremento_valor numeric default 0
+)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+  v_sesion_id uuid;
+  v_org_id uuid;
+  v_monto_total numeric(12, 2);
+  v_descuento numeric(12, 2);
+  v_incremento numeric(12, 2);
+  v_monto_neto numeric(12, 2);
+  v_monto_pagado numeric(12, 2);
+  v_concepto text;
+  v_item jsonb;
+  v_pago jsonb;
+  v_pago_id uuid;
+begin
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'Debe seleccionar al menos un producto';
+  end if;
+  -- p_pagos puede venir vacío: una venta puede quedar totalmente pendiente
+  -- (ej. un tramitador trae gente y paga al día siguiente) — sigue exigiendo
+  -- el PIN más abajo, porque $0 pagado siempre es menos del 50%.
+  if p_pagos is null or jsonb_typeof(p_pagos) <> 'array' then
+    raise exception 'El formato de los pagos es inválido';
+  end if;
+
+  select id into v_sesion_id from public.caja_sesiones
+    where sede_id = p_sede_id and estado = 'abierta';
+  if v_sesion_id is null then
+    raise exception 'Debe abrir caja antes de registrar una venta';
+  end if;
+
+  select sum((item ->> 'precio')::numeric) into v_monto_total
+    from jsonb_array_elements(p_items) as item;
+  select string_agg(item ->> 'nombre', ', ' order by ordinality) into v_concepto
+    from jsonb_array_elements(p_items) with ordinality as t (item, ordinality);
+  select coalesce(sum((pago ->> 'monto')::numeric), 0) into v_monto_pagado
+    from jsonb_array_elements(p_pagos) as pago;
+
+  if p_descuento_tipo is null or p_descuento_tipo = '' then
+    v_descuento := 0;
+  elsif p_descuento_tipo = 'porcentaje' then
+    if p_descuento_valor < 0 or p_descuento_valor > 100 then
+      raise exception 'El porcentaje de descuento debe estar entre 0 y 100';
+    end if;
+    v_descuento := round(v_monto_total * p_descuento_valor / 100, 2);
+  elsif p_descuento_tipo = 'fijo' then
+    if p_descuento_valor < 0 then
+      raise exception 'El descuento no puede ser negativo';
+    end if;
+    v_descuento := p_descuento_valor;
+  else
+    raise exception 'Tipo de descuento inválido';
+  end if;
+  if v_descuento > v_monto_total then
+    raise exception 'El descuento no puede superar el total de la orden';
+  end if;
+  v_monto_neto := v_monto_total - v_descuento;
+
+  -- Incremento (Brilla/Addi/Sistecrédito, etc.) — se calcula sobre el total
+  -- YA con descuento aplicado (lo que de verdad se está financiando), y se
+  -- le suma encima. A diferencia del descuento, no es editable después de
+  -- creada la venta.
+  if p_incremento_tipo is null or p_incremento_tipo = '' then
+    v_incremento := 0;
+  elsif p_incremento_tipo = 'porcentaje' then
+    if p_incremento_valor < 0 or p_incremento_valor > 100 then
+      raise exception 'El porcentaje de incremento debe estar entre 0 y 100';
+    end if;
+    v_incremento := round(v_monto_neto * p_incremento_valor / 100, 2);
+  elsif p_incremento_tipo = 'fijo' then
+    if p_incremento_valor < 0 then
+      raise exception 'El incremento no puede ser negativo';
+    end if;
+    v_incremento := p_incremento_valor;
+  else
+    raise exception 'Tipo de incremento inválido';
+  end if;
+  v_monto_neto := v_monto_neto + v_incremento;
+
+  if v_monto_pagado > v_monto_neto then
+    raise exception 'El pago no puede superar el total de la orden';
+  end if;
+
+  if v_monto_pagado < v_monto_neto * 0.5 then
+    if not public.verify_org_pin(p_pin) then
+      raise exception 'Se requiere el PIN de autorización para ventas con menos del 50%% de pago inicial';
+    end if;
+  end if;
+
+  v_org_id := public.current_org_id();
+
+  if p_precio_tramitador < 0 then
+    raise exception 'El precio del tramitador no puede ser negativo';
+  end if;
+  if p_precio_tramitador > v_monto_neto then
+    raise exception 'El precio del tramitador no puede superar el total de la orden';
+  end if;
+
+  insert into public.ventas (
+    organization_id, sede_id, cliente_id, concepto, monto, estado, vendedor_id, referido_nombre,
+    descuento, incremento, tramitador_id, precio_tramitador, categorias_licencia, created_by
+  )
+  values (
+    v_org_id, p_sede_id, p_cliente_id, v_concepto, v_monto_total,
+    case when v_monto_pagado >= v_monto_neto then 'pagada' else 'abonada' end,
+    p_vendedor_id, nullif(trim(p_referido_nombre), ''),
+    v_descuento, v_incremento, p_tramitador_id, p_precio_tramitador, p_categorias_licencia, auth.uid()
+  )
+  returning * into v_venta;
+
+  perform public.actualizar_vencimiento_licencia(p_cliente_id, p_categorias_licencia, v_venta.created_at::date);
+
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    insert into public.venta_items (venta_id, organization_id, sede_id, producto_id, nombre, precio)
+    values (
+      v_venta.id,
+      v_org_id,
+      p_sede_id,
+      nullif(v_item ->> 'producto_id', '')::uuid,
+      v_item ->> 'nombre',
+      (v_item ->> 'precio')::numeric
+    );
+  end loop;
+
+  for v_pago in select * from jsonb_array_elements(p_pagos)
+  loop
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
+    values (
+      v_venta.id, v_org_id, p_sede_id,
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
+    )
+    returning id into v_pago_id;
+
+    insert into public.caja_movimientos (
+      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, venta_pago_id, created_by
+    )
+    values (
+      v_sesion_id, v_org_id, p_sede_id, 'ingreso', v_concepto,
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', v_venta.id, v_pago_id, auth.uid()
+    );
+  end loop;
+
+  -- Si es una venta de tramitador, cruza en el momento contra cualquier
+  -- saldo a favor que ya tuviera acumulado (ver
+  -- tramitador_cruce_automatico) — así, si esta venta queda con deuda,
+  -- puede saldarse sola sin esperar a que alguien entre al módulo de
+  -- tramitador. Puede dejar esta misma venta en 'pagada', así que se
+  -- vuelve a leer antes de devolverla.
+  if p_tramitador_id is not null then
+    perform public.tramitador_cruce_automatico(p_tramitador_id, p_sede_id);
+    select * into v_venta from public.ventas where id = v_venta.id;
+  end if;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- REGISTRAR_ABONO: agrega uno o más pagos a una venta 'abonada' ya
+-- existente (el cliente vuelve a completar el saldo). No pide PIN — el
+-- mínimo del 50% solo aplica al arranque, no a terminar de pagar.
+-- =========================================================
+create or replace function public.registrar_abono(
+  p_venta_id uuid,
+  p_pagos jsonb
+)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+  v_sesion_id uuid;
+  v_pagado_previo numeric(12, 2);
+  v_monto_nuevo numeric(12, 2);
+  v_pago jsonb;
+  v_pago_id uuid;
+begin
+  if p_pagos is null or jsonb_typeof(p_pagos) <> 'array' or jsonb_array_length(p_pagos) = 0 then
+    raise exception 'Debe registrar al menos un pago';
+  end if;
+
+  select * into v_venta from public.ventas where id = p_venta_id for update;
+  if v_venta.id is null then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.estado = 'anulada' then
+    raise exception 'La venta está anulada';
+  end if;
+  if v_venta.estado = 'pagada' then
+    raise exception 'La venta ya está paga por completo';
+  end if;
+
+  select id into v_sesion_id from public.caja_sesiones
+    where sede_id = v_venta.sede_id and estado = 'abierta';
+  if v_sesion_id is null then
+    raise exception 'Debe abrir caja antes de registrar un abono';
+  end if;
+
+  select coalesce(sum(monto), 0) into v_pagado_previo
+    from public.venta_pagos where venta_id = p_venta_id;
+  select sum((pago ->> 'monto')::numeric) into v_monto_nuevo
+    from jsonb_array_elements(p_pagos) as pago;
+
+  if v_pagado_previo + v_monto_nuevo > (v_venta.monto - v_venta.descuento + v_venta.incremento) then
+    raise exception 'El pago supera el saldo pendiente';
+  end if;
+
+  for v_pago in select * from jsonb_array_elements(p_pagos)
+  loop
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
+    values (
+      p_venta_id, v_venta.organization_id, v_venta.sede_id,
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
+    )
+    returning id into v_pago_id;
+
+    insert into public.caja_movimientos (
+      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, venta_pago_id, created_by
+    )
+    values (
+      v_sesion_id, v_venta.organization_id, v_venta.sede_id, 'ingreso', v_venta.concepto,
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', p_venta_id, v_pago_id, auth.uid()
+    );
+  end loop;
+
+  update public.ventas
+  set estado = case when v_pagado_previo + v_monto_nuevo >= (monto - descuento + incremento) then 'pagada' else 'abonada' end
+  where id = p_venta_id
+  returning * into v_venta;
+
+  -- Si esta venta tiene tramitador, este pago pudo haber generado margen
+  -- nuevo (o liberado saldo) — cruza en el momento contra cualquier otra
+  -- venta pendiente del mismo tramitador en esta sede (ver
+  -- tramitador_cruce_automatico). Puede cambiar el estado de ESTA misma
+  -- venta si quedó como la más vieja pendiente, así que se relee.
+  if v_venta.tramitador_id is not null then
+    perform public.tramitador_cruce_automatico(v_venta.tramitador_id, v_venta.sede_id);
+    select * into v_venta from public.ventas where id = p_venta_id;
+  end if;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- CRUZAR_SALDO_TRAMITADOR: cuando un tramitador trae gente y no paga en el
+-- momento (ej. "trajo 3 personas hoy y paga mañana"), la venta queda
+-- registrada sin pago inicial (ver registrar_venta más arriba, p_pagos
+-- vacío). Si para cuando se pone al día el tramitador ya tiene un saldo a
+-- favor acumulado (le sobró plata de otras ventas suyas), esta función
+-- permite saldar la venta pendiente contra ese saldo en vez de exigir
+-- efectivo real: no genera ningún caja_movimientos (no entra plata a la
+-- caja), inserta un venta_pagos con metodo_pago='cruce_tramitador' (para
+-- que la venta refleje que ya está cubierta) y un tramitador_pagos por el
+-- mismo monto (para que ese saldo a favor baje exactamente lo mismo que
+-- subió el pago de la venta) — admin-only, mismo criterio que los pagos
+-- directos al tramitador (registrarPagoTramitador).
+-- =========================================================
+create or replace function public.cruzar_saldo_tramitador(
+  p_venta_id uuid,
+  p_monto numeric
+)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+  v_saldo_pendiente numeric(12, 2);
+  v_saldo_tramitador numeric(12, 2);
+  v_cliente_nombre text;
+  v_pago_id uuid;
+begin
+  if public.current_role() <> 'admin' then
+    raise exception 'Solo un administrador puede cruzar el saldo de un tramitador';
+  end if;
+
+  if p_monto is null or p_monto <= 0 then
+    raise exception 'El monto a cruzar debe ser mayor a cero';
+  end if;
+
+  select * into v_venta from public.ventas where id = p_venta_id for update;
+  if v_venta.id is null or v_venta.organization_id is distinct from public.current_org_id() then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.tramitador_id is null then
+    raise exception 'Esta venta no tiene un tramitador asociado';
+  end if;
+  if v_venta.estado = 'anulada' then
+    raise exception 'La venta está anulada';
+  end if;
+  if v_venta.estado = 'pagada' then
+    raise exception 'La venta ya está paga por completo';
+  end if;
+
+  select (v_venta.monto - v_venta.descuento + v_venta.incremento) - coalesce(sum(monto), 0) into v_saldo_pendiente
+    from public.venta_pagos where venta_id = v_venta.id;
+  if p_monto > v_saldo_pendiente then
+    raise exception 'El monto supera el saldo pendiente de la venta';
+  end if;
+
+  -- Mismo cálculo que tramitadores_saldo (no uno propio aparte que pueda
+  -- divergir) — ver esa función para el criterio completo.
+  select coalesce(saldo_a_favor, 0) into v_saldo_tramitador
+  from public.tramitadores_saldo(null)
+  where id = v_venta.tramitador_id;
+  v_saldo_tramitador := coalesce(v_saldo_tramitador, 0);
+
+  if p_monto > v_saldo_tramitador then
+    raise exception 'El tramitador no tiene suficiente saldo a favor para cruzar ese monto';
+  end if;
+
+  select nombre_completo into v_cliente_nombre from public.clientes where id = v_venta.cliente_id;
+
+  insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
+  values (v_venta.id, v_venta.organization_id, v_venta.sede_id, p_monto, 'cruce_tramitador', auth.uid())
+  returning id into v_pago_id;
+
+  insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, venta_pago_id, created_by)
+  values (
+    v_venta.tramitador_id, v_venta.organization_id, v_venta.sede_id, p_monto,
+    'Cruce con venta de ' || coalesce(v_cliente_nombre, 'cliente'), v_pago_id, auth.uid()
+  );
+
+  update public.ventas
+  set estado = case
+    when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento + v_venta.incremento)
+    then 'pagada' else 'abonada'
+  end
+  where id = v_venta.id
+  returning * into v_venta;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- TRAMITADOR_CRUCE_AUTOMATICO: aplica el saldo a favor que el tramitador
+-- ya tiene acumulado contra sus ventas 'abonada' pendientes en una sede,
+-- de la más vieja a la más nueva, hasta agotar el crédito disponible.
+-- No genera caja_movimientos (no es efectivo real): inserta un
+-- venta_pagos 'cruce_tramitador' + un tramitador_pagos por cada venta que
+-- alcanza a cubrir. Mismo mecanismo que cruzar_saldo_tramitador, pero
+-- recorriendo todas las ventas pendientes de la sede en vez de una sola.
+--
+-- Se llama SOLA desde registrar_venta y registrar_abono cada vez que se
+-- crea o se paga una venta de un tramitador — así los cruces quedan al
+-- día en tiempo real (ej. debe 140.000 por una venta y en la sede ya
+-- tenía 140.000 a favor de otra: se salda sin que nadie tenga que entrar
+-- al módulo de tramitador) en vez de acumularse hasta que alguien haga
+-- "Registrar abono". Ese módulo se reserva para cuando el tramitador
+-- trae efectivo real (ver registrar_abono_tramitador, que reusa esta
+-- misma función para su cruce automático antes de pedir plata nueva).
+--
+-- security invoker: cada insert queda sujeto a la RLS de quien la llama
+-- (heredada de quien llamó a registrar_venta/registrar_abono/etc.), así
+-- un recepcionista solo cruza ventas de su propia sede.
+-- =========================================================
+create or replace function public.tramitador_cruce_automatico(
+  p_tramitador_id uuid,
+  p_sede_id uuid
+)
+returns numeric
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_tramitador public.tramitadores;
+  v_venta record;
+  v_pendiente_venta numeric(12, 2);
+  v_allocar numeric(12, 2);
+  v_saldo_tramitador numeric(12, 2);
+  v_cliente_nombre text;
+  v_pago_id uuid;
+  v_total_cruzado numeric(12, 2) := 0;
+begin
+  if p_tramitador_id is null or p_sede_id is null then
+    return 0;
+  end if;
+
+  select * into v_tramitador from public.tramitadores where id = p_tramitador_id;
+  if v_tramitador.id is null then
+    return 0;
+  end if;
+
+  select coalesce(saldo_a_favor, 0) into v_saldo_tramitador
+  from public.tramitadores_saldo(null)
+  where id = p_tramitador_id;
+  v_saldo_tramitador := greatest(coalesce(v_saldo_tramitador, 0), 0);
+
+  if v_saldo_tramitador <= 0 then
+    return 0;
+  end if;
+
+  for v_venta in
+    select v.id, v.monto, v.descuento, v.sede_id, v.cliente_id
+    from public.ventas v
+    where v.tramitador_id = p_tramitador_id
+      and v.sede_id = p_sede_id
+      and v.estado = 'abonada'
+    order by v.created_at asc
+    for update
+  loop
+    exit when v_saldo_tramitador <= 0;
+
+    select (v_venta.monto - v_venta.descuento + v_venta.incremento) - coalesce(sum(monto), 0) into v_pendiente_venta
+      from public.venta_pagos where venta_id = v_venta.id;
+    if v_pendiente_venta <= 0 then
+      continue;
+    end if;
+
+    v_allocar := least(v_saldo_tramitador, v_pendiente_venta);
+
+    select nombre_completo into v_cliente_nombre from public.clientes where id = v_venta.cliente_id;
+
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, created_by)
+    values (v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, 'cruce_tramitador', auth.uid())
+    returning id into v_pago_id;
+
+    insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, venta_pago_id, created_by)
+    values (
+      p_tramitador_id, v_tramitador.organization_id, p_sede_id, v_allocar,
+      'Cruce automático con venta de ' || coalesce(v_cliente_nombre, 'cliente'), v_pago_id, auth.uid()
+    );
+
+    update public.ventas
+    set estado = case
+      when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento + v_venta.incremento)
+      then 'pagada' else 'abonada'
+    end
+    where id = v_venta.id;
+
+    v_saldo_tramitador := v_saldo_tramitador - v_allocar;
+    v_total_cruzado := v_total_cruzado + v_allocar;
+  end loop;
+
+  return v_total_cruzado;
+end;
+$$;
+
+-- =========================================================
+-- TRAMITADOR_REVERTIR_CREDITO_NEGATIVO: si el saldo a favor de un
+-- tramitador queda en negativo (ej. se anuló una venta que ya había
+-- generado margen y ese margen ya se había cruzado contra otra venta —
+-- ver anular_venta más abajo), esta función deshace automáticamente los
+-- cruces más recientes de esa sede hasta que el saldo deja de ser
+-- negativo (puede quedar en $0 o levemente positivo, nunca exacto porque
+-- cada cruce se deshace completo, no se parte).
+--
+-- Solo toca tramitador_pagos que tengan venta_pago_id (o sea, que vengan
+-- de un cruce real, nunca de una comisión pagada en efectivo — esa sí
+-- fue plata real que salió de caja, no se puede "deshacer" sola). Al
+-- borrar el venta_pagos vinculado, la venta que se había beneficiado del
+-- cruce vuelve a quedar con su saldo pendiente real, y su estado se
+-- recalcula (puede volver de 'pagada' a 'abonada').
+-- =========================================================
+create or replace function public.tramitador_revertir_credito_negativo(
+  p_tramitador_id uuid,
+  p_sede_id uuid
+)
+returns numeric
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_saldo numeric(12, 2);
+  v_faltante numeric(12, 2);
+  v_pago record;
+  v_venta_id uuid;
+  v_total_revertido numeric(12, 2) := 0;
+begin
+  if p_tramitador_id is null or p_sede_id is null then
+    return 0;
+  end if;
+
+  select coalesce(saldo_a_favor, 0) into v_saldo
+  from public.tramitadores_saldo(null)
+  where id = p_tramitador_id;
+  v_saldo := coalesce(v_saldo, 0);
+
+  if v_saldo >= 0 then
+    return 0;
+  end if;
+
+  v_faltante := -v_saldo;
+
+  for v_pago in
+    select tp.id, tp.monto, tp.venta_pago_id
+    from public.tramitador_pagos tp
+    where tp.tramitador_id = p_tramitador_id
+      and tp.sede_id = p_sede_id
+      and tp.venta_pago_id is not null
+    order by tp.created_at desc
+    for update
+  loop
+    exit when v_faltante <= 0;
+
+    select venta_id into v_venta_id from public.venta_pagos where id = v_pago.venta_pago_id;
+
+    delete from public.venta_pagos where id = v_pago.venta_pago_id;
+    delete from public.tramitador_pagos where id = v_pago.id;
+
+    if v_venta_id is not null then
+      update public.ventas
+      set estado = case
+        when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta_id) >= (monto - descuento + incremento)
+        then 'pagada' else 'abonada'
+      end
+      where id = v_venta_id and estado <> 'anulada';
+    end if;
+
+    v_faltante := v_faltante - v_pago.monto;
+    v_total_revertido := v_total_revertido + v_pago.monto;
+  end loop;
+
+  return v_total_revertido;
+end;
+$$;
+
+-- =========================================================
+-- ANULAR_VENTA: reemplaza el simple "update estado='anulada'" que hacía
+-- la app directo — necesario porque anular una venta con tramitador
+-- puede dejar sin respaldo un crédito que ya se le había cruzado a otra
+-- venta suya (ver tramitador_revertir_credito_negativo). Antes esto había
+-- que arreglarlo a mano con SQL cada vez que pasaba.
+-- =========================================================
+drop function if exists public.anular_venta(uuid);
+create or replace function public.anular_venta(p_venta_id uuid)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+begin
+  select * into v_venta from public.ventas where id = p_venta_id for update;
+  if v_venta.id is null then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.estado = 'anulada' then
+    raise exception 'La venta ya está anulada';
+  end if;
+
+  update public.ventas set estado = 'anulada' where id = p_venta_id returning * into v_venta;
+
+  if v_venta.tramitador_id is not null then
+    perform public.tramitador_revertir_credito_negativo(v_venta.tramitador_id, v_venta.sede_id);
+  end if;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- REGISTRAR_ABONO_TRAMITADOR: cuando el tramitador (no el cliente) es
+-- quien salda lo que debe — ej. trajo 5 personas en el día, ninguna pagó
+-- en el momento, y al cierre él paga los $700.000 acumulados de una vez.
+--
+-- Paso 1: como los cruces ahora corren solos en cada venta/abono (ver
+-- tramitador_cruce_automatico más arriba), acá normalmente ya no queda
+-- crédito para cruzar — se repite solo por si apareció saldo a favor
+-- nuevo justo antes de este abono (ej. otra venta se acaba de pagar).
+--
+-- Paso 2: lo que quede pendiente después del cruce se cubre con p_pagos
+-- (efectivo real, entra a caja) — reparte entre sus ventas 'abonada' de
+-- esa sede, de la más vieja a la más nueva, insertando un venta_pagos (y
+-- su caja_movimientos 'ingreso' correspondiente) por cada venta que
+-- alcanza a cubrir, hasta agotar el monto. Si el pago no alcanza a
+-- cubrir todo, la última venta tocada queda parcialmente abonada; si el
+-- pago supera lo que queda pendiente en esa sede, rechaza. p_pagos puede
+-- venir vacío si el cruce del paso 1 ya cubrió todo.
+--
+-- security invoker (como registrar_abono): cada insert queda sujeto a la
+-- RLS normal de quien llama, así un recepcionista solo puede aplicar esto
+-- a su propia sede.
+-- =========================================================
+drop function if exists public.registrar_abono_tramitador(uuid, uuid, jsonb);
+create or replace function public.registrar_abono_tramitador(
+  p_tramitador_id uuid,
+  p_sede_id uuid,
+  p_pagos jsonb
+)
+returns table (total_cruzado numeric, total_efectivo numeric)
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_tramitador public.tramitadores;
+  v_sesion_id uuid;
+  v_pago jsonb;
+  v_restante numeric(12, 2);
+  v_venta record;
+  v_pendiente_venta numeric(12, 2);
+  v_allocar numeric(12, 2);
+  v_pago_id uuid;
+  v_total_efectivo numeric(12, 2) := 0;
+  v_total_cruzado numeric(12, 2) := 0;
+begin
+  if p_pagos is null or jsonb_typeof(p_pagos) <> 'array' then
+    raise exception 'Formato de pagos inválido';
+  end if;
+
+  select * into v_tramitador from public.tramitadores where id = p_tramitador_id;
+  if v_tramitador.id is null or v_tramitador.organization_id is distinct from public.current_org_id() then
+    raise exception 'Tramitador no encontrado';
+  end if;
+
+  select id into v_sesion_id from public.caja_sesiones
+    where sede_id = p_sede_id and estado = 'abierta';
+  if v_sesion_id is null then
+    raise exception 'Debe abrir caja antes de registrar el abono';
+  end if;
+
+  -- Paso 1: cruzar automáticamente el saldo a favor existente.
+  v_total_cruzado := public.tramitador_cruce_automatico(p_tramitador_id, p_sede_id);
+
+  -- Paso 2: lo que siga pendiente se cubre con efectivo nuevo (p_pagos).
+  if jsonb_array_length(p_pagos) > 0 then
+    for v_pago in select * from jsonb_array_elements(p_pagos)
+    loop
+      v_restante := (v_pago ->> 'monto')::numeric;
+      if v_restante is null or v_restante <= 0 then
+        continue;
+      end if;
+
+      for v_venta in
+        select v.id, v.monto, v.descuento, v.sede_id
+        from public.ventas v
+        where v.tramitador_id = p_tramitador_id
+          and v.sede_id = p_sede_id
+          and v.estado = 'abonada'
+        order by v.created_at asc
+        for update
+      loop
+        exit when v_restante <= 0;
+
+        select (v_venta.monto - v_venta.descuento + v_venta.incremento) - coalesce(sum(monto), 0) into v_pendiente_venta
+          from public.venta_pagos where venta_id = v_venta.id;
+        if v_pendiente_venta <= 0 then
+          continue;
+        end if;
+
+        v_allocar := least(v_restante, v_pendiente_venta);
+
+        insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
+        values (
+          v_venta.id, v_tramitador.organization_id, v_venta.sede_id, v_allocar, v_pago ->> 'metodo_pago',
+          nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
+        )
+        returning id into v_pago_id;
+
+        insert into public.caja_movimientos (
+          caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago,
+          venta_id, venta_pago_id, tramitador_id, created_by
+        )
+        values (
+          v_sesion_id, v_tramitador.organization_id, p_sede_id, 'ingreso',
+          'Abono de ' || v_tramitador.nombre, v_allocar, v_pago ->> 'metodo_pago',
+          v_venta.id, v_pago_id, p_tramitador_id, auth.uid()
+        );
+
+        update public.ventas
+        set estado = case
+          when (select coalesce(sum(monto), 0) from public.venta_pagos where venta_id = v_venta.id) >= (v_venta.monto - v_venta.descuento + v_venta.incremento)
+          then 'pagada' else 'abonada'
+        end
+        where id = v_venta.id;
+
+        v_restante := v_restante - v_allocar;
+        v_total_efectivo := v_total_efectivo + v_allocar;
+      end loop;
+
+      if v_restante > 0 then
+        raise exception 'El pago supera lo que debe el tramitador en esta sede';
+      end if;
+    end loop;
+  end if;
+
+  if v_total_cruzado = 0 and v_total_efectivo = 0 then
+    raise exception 'Debe registrar al menos un pago';
+  end if;
+
+  return query select v_total_cruzado, v_total_efectivo;
+end;
+$$;
+
+-- =========================================================
+-- REGISTRAR_COMISION_TRAMITADOR: la organización le paga al tramitador lo
+-- que le corresponde (su saldo a favor) — a diferencia del pago directo
+-- anterior (que solo dejaba constancia en tramitador_pagos, sin tocar
+-- caja), esto SÍ es plata real que sale de la caja, así que también
+-- inserta un caja_movimientos 'egreso' — afecta el cierre del día.
+-- =========================================================
+drop function if exists public.registrar_comision_tramitador(uuid, uuid, numeric, text, text);
+create or replace function public.registrar_comision_tramitador(
+  p_tramitador_id uuid,
+  p_sede_id uuid,
+  p_monto numeric,
+  p_metodo_pago text,
+  p_nota text default null
+)
+returns public.tramitador_pagos
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_tramitador public.tramitadores;
+  v_sesion_id uuid;
+  v_saldo numeric(12, 2);
+  v_pago public.tramitador_pagos;
+begin
+  if p_monto is null or p_monto <= 0 then
+    raise exception 'Ingresá un monto válido';
+  end if;
+
+  select * into v_tramitador from public.tramitadores where id = p_tramitador_id;
+  if v_tramitador.id is null or v_tramitador.organization_id is distinct from public.current_org_id() then
+    raise exception 'Tramitador no encontrado';
+  end if;
+
+  select id into v_sesion_id from public.caja_sesiones
+    where sede_id = p_sede_id and estado = 'abierta';
+  if v_sesion_id is null then
+    raise exception 'Debe abrir caja antes de pagar la comisión';
+  end if;
+
+  select coalesce(saldo_a_favor, 0) into v_saldo
+  from public.tramitadores_saldo(null)
+  where id = p_tramitador_id;
+  v_saldo := coalesce(v_saldo, 0);
+
+  if p_monto > v_saldo then
+    raise exception 'El tramitador no tiene suficiente saldo a favor';
+  end if;
+
+  insert into public.tramitador_pagos (tramitador_id, organization_id, sede_id, monto, nota, created_by)
+  values (p_tramitador_id, v_tramitador.organization_id, p_sede_id, p_monto, p_nota, auth.uid())
+  returning * into v_pago;
+
+  insert into public.caja_movimientos (
+    caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago,
+    tramitador_id, tramitador_pago_id, created_by
+  )
+  values (
+    v_sesion_id, v_tramitador.organization_id, p_sede_id, 'egreso',
+    'Comisión ' || v_tramitador.nombre, p_monto, p_metodo_pago,
+    p_tramitador_id, v_pago.id, auth.uid()
+  );
+
+  return v_pago;
+end;
+$$;
+
+-- =========================================================
+-- ELIMINAR_TRAMITADOR: borrado real (no solo desactivar) de un tramitador
+-- que nunca llegó a tener actividad de verdad — exige el PIN de
+-- autorización (mismo mecanismo que las ventas con <50% de pago inicial)
+-- y se niega si ya tiene ventas o pagos de comisión registrados, para no
+-- perder historial financiero por accidente. Si ya tiene actividad, la
+-- opción es desactivarlo (toggleTramitadorActive), no borrarlo.
+-- =========================================================
+create or replace function public.eliminar_tramitador(
+  p_tramitador_id uuid,
+  p_pin text
+)
+returns void
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_ventas_count int;
+  v_pagos_count int;
+begin
+  if public.current_role() <> 'admin' then
+    raise exception 'Solo un administrador puede eliminar tramitadores';
+  end if;
+  if not public.verify_org_pin(p_pin) then
+    raise exception 'PIN de autorización incorrecto';
+  end if;
+
+  select count(*) into v_ventas_count from public.ventas where tramitador_id = p_tramitador_id;
+  if v_ventas_count > 0 then
+    raise exception 'Este tramitador ya tiene % ventas registradas — desactivalo en vez de eliminarlo', v_ventas_count;
+  end if;
+
+  select count(*) into v_pagos_count from public.tramitador_pagos where tramitador_id = p_tramitador_id;
+  if v_pagos_count > 0 then
+    raise exception 'Este tramitador ya tiene pagos de comisión registrados — desactivalo en vez de eliminarlo';
+  end if;
+
+  delete from public.tramitador_precios where tramitador_id = p_tramitador_id;
+  delete from public.tramitadores where id = p_tramitador_id;
+end;
+$$;
+
+-- =========================================================
+-- TRAMITADORES_SALDO: el saldo a favor de cada tramitador activo visible en
+-- una sede (mismo criterio que el picker de venta-form: sede_id null =
+-- todas las sedes, o puntual). p_sede_id en null significa "todas las
+-- sedes sin filtrar" (lo usa /admin/tramitadores, que ve el catálogo
+-- completo) — no confundir con tramitadores.sede_id null, que es un
+-- tramitador global visible desde cualquier sede.
+--
+-- Existe porque tramitador_pagos es de solo lectura para admin
+-- (tramitador_pagos_select_admin) — un recepcionista no puede leer esa
+-- tabla directo, así que el resumen "Valores pendientes" del dashboard
+-- (que sí necesita ver un recepcionista) daba un saldo inflado: nunca
+-- restaba lo que ya se le había pagado al tramitador. Esta función corre
+-- con privilegios elevados (security definer) para calcular el número,
+-- pero solo devuelve el saldo neto y sus componentes — nunca los pagos en
+-- sí, así que no se filtra nada de lo que se quiso mantener admin-only.
+--
+-- Una venta sin tramitador de margen (precio cobrado = precio especial)
+-- que queda pagada no le genera crédito NI deuda al tramitador — su pago
+-- simplemente cancela lo que se le debía cobrar. Solo cuando el precio
+-- cobrado supera el precio especial (ganancia real) se acredita esa
+-- diferencia a su favor una vez que efectivamente se cobra. Si la venta
+-- queda SIN pagar, en cambio, el total completo cuenta como deuda suya —
+-- así traiga además un producto que no tiene nada que ver con él (ej.
+-- una impresión): si el cliente no paga, la organización se lo cobra a
+-- él, no al cliente. Por eso "reclamo" (monto neto menos su ganancia
+-- potencial) SÍ se resta completo cuando no hay pago, pero al pagarse
+-- queda saldado por el mismo monto que entra como "pagado_clientes" —
+-- nunca de más ("pagar lo que debe" debe dejarlo en $0, no en crédito a
+-- su favor).
+-- =========================================================
+drop function if exists public.tramitadores_saldo(uuid);
+create or replace function public.tramitadores_saldo(p_sede_id uuid default null)
+returns table (
+  id uuid,
+  nombre text,
+  pagado_clientes numeric,
+  reclamo numeric,
+  pagado_tramitador numeric,
+  saldo_a_favor numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return query
+  select
+    t.id,
+    t.nombre,
+    coalesce(v_sum.pagado_clientes, 0) as pagado_clientes,
+    coalesce(v_sum.reclamo, 0) as reclamo,
+    coalesce(tp_sum.pagado_tramitador, 0) as pagado_tramitador,
+    coalesce(v_sum.pagado_clientes, 0) - coalesce(v_sum.reclamo, 0) - coalesce(tp_sum.pagado_tramitador, 0) as saldo_a_favor
+  from public.tramitadores t
+  left join lateral (
+    select sum(vs.pagado) as pagado_clientes, sum(vs.reclamo) as reclamo
+    from (
+      select
+        coalesce(pagos.pagado, 0) as pagado,
+        (v.monto - v.descuento + v.incremento) - greatest(
+          0,
+          (
+            referidos.monto_referido
+            - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
+          ) - v.precio_tramitador
+        ) as reclamo
+      from public.ventas v
+      left join lateral (
+        select case
+          when count(*) > 0 then sum(vi.precio)
+          else v.monto
+        end as monto_referido
+        from public.venta_items vi
+        where vi.venta_id = v.id
+          and vi.producto_id in (select tp.producto_id from public.tramitador_precios tp where tp.tramitador_id = t.id)
+      ) referidos on true
+      left join lateral (
+        -- 'cruce_tramitador' no es plata nueva de un cliente — es crédito
+        -- que el tramitador ya tenía, reasignado a esta venta. Si se
+        -- contara acá, pagado_clientes subiría exactamente igual que
+        -- pagado_tramitador y el saldo a favor nunca bajaría después de
+        -- cruzarse, permitiendo cruzar el mismo crédito una y otra vez.
+        select coalesce(sum(vp.monto), 0) as pagado
+        from public.venta_pagos vp
+        where vp.venta_id = v.id and vp.metodo_pago <> 'cruce_tramitador'
+      ) pagos on true
+      where v.tramitador_id = t.id and v.estado <> 'anulada'
+    ) vs
+  ) v_sum on true
+  left join lateral (
+    select sum(tp.monto) as pagado_tramitador
+    from public.tramitador_pagos tp
+    where tp.tramitador_id = t.id
+  ) tp_sum on true
+  where t.active = true
+    and t.organization_id = public.current_org_id()
+    and (p_sede_id is null or t.sede_id is null or t.sede_id = p_sede_id)
+  order by t.nombre;
+end;
+$$;
+
+-- =========================================================
+-- TRAMITADOR_EXTRACTO: el detalle cronológico (tipo extracto bancario) de
+-- cómo se armó el saldo de UN tramitador — una fila por cada venta suya
+-- (con su aporte neto, mismo criterio de tramitadores_saldo: solo su
+-- ganancia real cuenta como crédito, lo pendiente cuenta como deuda
+-- completa) y una fila por cada pago que ya se le hizo a él (siempre en
+-- contra, resta del saldo), ambas con un saldo acumulado corrido — para
+-- responder "¿de dónde salió este número?" sin tener que hacer la cuenta
+-- a mano.
+--
+-- security definer por el mismo motivo que tramitadores_saldo: necesita
+-- leer tramitador_pagos aunque quien pregunte sea un recepcionista, y
+-- mostrar SIEMPRE el cuadre completo (todas las sedes de este tramitador)
+-- para que el número final coincida exactamente con el que ya se ve en el
+-- resumen — no una versión recortada a la sede de quien mira.
+-- =========================================================
+drop function if exists public.tramitador_extracto(uuid);
+create or replace function public.tramitador_extracto(p_tramitador_id uuid)
+returns table (
+  fecha timestamptz,
+  tipo text,
+  referencia_id uuid,
+  descripcion text,
+  monto numeric,
+  pagado numeric,
+  total numeric,
+  saldo_acumulado numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.tramitadores t
+    where t.id = p_tramitador_id and t.organization_id = public.current_org_id()
+  ) then
+    return;
+  end if;
+
+  return query
+  with eventos as (
+    select
+      v.created_at as fecha,
+      'venta'::text as tipo,
+      v.id as referencia_id,
+      coalesce(c.nombre_completo, 'Cliente') as descripcion,
+      (
+        coalesce(pagos.pagado, 0) - (
+          (v.monto - v.descuento + v.incremento) - greatest(
+            0,
+            (
+              referidos.monto_referido
+              - case when v.monto > 0 then round(v.descuento * referidos.monto_referido / v.monto) else 0 end
+            ) - v.precio_tramitador
+          )
+        )
+      ) as monto,
+      coalesce(pagos.pagado, 0) as pagado,
+      (v.monto - v.descuento + v.incremento) as total
+    from public.ventas v
+    left join public.clientes c on c.id = v.cliente_id
+    left join lateral (
+      select case
+        when count(*) > 0 then sum(vi.precio)
+        else v.monto
+      end as monto_referido
+      from public.venta_items vi
+      where vi.venta_id = v.id
+        and vi.producto_id in (select tp.producto_id from public.tramitador_precios tp where tp.tramitador_id = p_tramitador_id)
+    ) referidos on true
+    left join lateral (
+      -- Mismo criterio que tramitadores_saldo: un cruce no es plata nueva
+      -- del cliente, así que no cuenta acá (el pago_tramitador de abajo ya
+      -- refleja esa salida de crédito).
+      select coalesce(sum(vp.monto), 0) as pagado
+      from public.venta_pagos vp
+      where vp.venta_id = v.id and vp.metodo_pago <> 'cruce_tramitador'
+    ) pagos on true
+    where v.tramitador_id = p_tramitador_id and v.estado <> 'anulada'
+
+    union all
+
+    select
+      tp.created_at as fecha,
+      'pago_tramitador'::text as tipo,
+      tp.id as referencia_id,
+      coalesce(tp.nota, 'Pago al tramitador') as descripcion,
+      -tp.monto as monto,
+      null::numeric as pagado,
+      null::numeric as total
+    from public.tramitador_pagos tp
+    where tp.tramitador_id = p_tramitador_id
+  )
+  select
+    e.fecha,
+    e.tipo,
+    e.referencia_id,
+    e.descripcion,
+    e.monto,
+    e.pagado,
+    e.total,
+    sum(e.monto) over (order by e.fecha rows between unbounded preceding and current row) as saldo_acumulado
+  from eventos e
+  order by e.fecha;
+end;
+$$;
+
+-- =========================================================
+-- CORREGIR_PRECIO_TRAMITADOR_VENTA: corrige el precio especial (lo que le
+-- corresponde a la organización) de una venta ya creada — antes no existía
+-- ninguna forma de arreglar esto si quedaba mal cargado (ej. el campo se
+-- editó a mano por error y quedó en $0), solo se podía ver, nunca corregir.
+-- Admin-only, mismo criterio que corregir_forma_pago_venta.
+-- =========================================================
+create or replace function public.corregir_precio_tramitador_venta(
+  p_venta_id uuid,
+  p_precio_tramitador numeric
+)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+begin
+  if public.current_role() <> 'admin' then
+    raise exception 'Solo un administrador puede corregir el precio del tramitador';
+  end if;
+  if p_precio_tramitador is null or p_precio_tramitador < 0 then
+    raise exception 'El precio del tramitador no puede ser negativo';
+  end if;
+
+  select * into v_venta from public.ventas where id = p_venta_id;
+  if v_venta.id is null or v_venta.organization_id is distinct from public.current_org_id() then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.tramitador_id is null then
+    raise exception 'Esta venta no tiene un tramitador asociado';
+  end if;
+  if p_precio_tramitador > (v_venta.monto - v_venta.descuento + v_venta.incremento) then
+    raise exception 'El precio del tramitador no puede superar el total de la orden';
+  end if;
+
+  update public.ventas
+  set precio_tramitador = p_precio_tramitador
+  where id = p_venta_id
+  returning * into v_venta;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- CORREGIR_FORMA_PAGO_VENTA: cambia el método de pago de UN pago puntual
+-- ya registrado (ej. se cargó "efectivo" por error y era "transferencia").
+-- No toca monto, venta_id ni nada más — venta_pagos sigue siendo inmutable
+-- para todo lo demás. Se replica el cambio al caja_movimientos que generó
+-- ese pago (por venta_pago_id) para que el cierre de caja no quede
+-- descuadrado. security definer porque venta_pagos/caja_movimientos no
+-- tienen policy de update para nadie (por diseño); el chequeo de permisos
+-- se hace acá a mano, igual que en set_org_pin.
+--
+-- admin: puede corregir cualquier pago de su organización, en cualquier
+-- momento. recepcionista: solo pagos de su propia sede, y solo mientras la
+-- caja de esa sede siga abierta — una vez cerrada, ese cierre ya se
+-- imprimió/cuadró y no se puede reescribir desde acá.
+-- =========================================================
+create or replace function public.corregir_forma_pago_venta(
+  p_venta_pago_id uuid,
+  p_metodo_pago text
+)
+returns public.venta_pagos
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pago public.venta_pagos;
+  v_rol text;
+  v_sesion_abierta boolean;
+begin
+  select * into v_pago from public.venta_pagos where id = p_venta_pago_id;
+  if v_pago.id is null or v_pago.organization_id is distinct from public.current_org_id() then
+    raise exception 'Pago no encontrado';
+  end if;
+  if v_pago.metodo_pago = 'cruce_tramitador' then
+    raise exception 'Un cruce con tramitador no se puede corregir como un pago normal';
+  end if;
+
+  v_rol := public.current_role();
+
+  if v_rol = 'admin' then
+    -- sin restricción adicional: org-wide, en cualquier momento.
+    null;
+  elsif v_rol = 'recepcionista' then
+    if v_pago.sede_id is distinct from public.current_sede_id() then
+      raise exception 'No autorizado';
+    end if;
+    select exists(
+      select 1 from public.caja_sesiones
+      where sede_id = v_pago.sede_id and estado = 'abierta'
+    ) into v_sesion_abierta;
+    if not v_sesion_abierta then
+      raise exception 'Abrí la caja de esta sede para poder corregir la forma de pago';
+    end if;
+  else
+    raise exception 'No autorizado';
+  end if;
+
+  if p_metodo_pago not in ('efectivo', 'transferencia', 'tarjeta', 'nequi', 'addi', 'credito', 'brilla', 'sistecredito', 'otro') then
+    raise exception 'Forma de pago inválida';
+  end if;
+
+  update public.venta_pagos
+  set metodo_pago = p_metodo_pago,
+      metodo_pago_editado_por = auth.uid(),
+      metodo_pago_editado_at = now()
+  where id = p_venta_pago_id
+  returning * into v_pago;
+
+  update public.caja_movimientos
+  set metodo_pago = p_metodo_pago
+  where venta_pago_id = p_venta_pago_id;
+
+  return v_pago;
+end;
+$$;
+
+-- =========================================================
+-- APLICAR_DESCUENTO_VENTA: fija (o quita) el descuento de una venta ya
+-- existente — pensada para /admin/mora, donde el admin revisa clientes con
+-- saldo pendiente y negocia una rebaja de la deuda. Solo admin (chequeado a
+-- mano, no depende únicamente de la policy de UPDATE porque acá además hay
+-- que validar que el descuento no deje el total por debajo de lo ya
+-- pagado). security invoker: la escritura igual pasa por
+-- ventas_update_admin + el trigger de columnas privilegiadas de abajo.
+-- =========================================================
+create or replace function public.aplicar_descuento_venta(
+  p_venta_id uuid,
+  p_descuento_tipo text,
+  p_descuento_valor numeric default 0
+)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+  v_pagado numeric(12, 2);
+  v_descuento numeric(12, 2);
+begin
+  if public.current_role() is distinct from 'admin' then
+    raise exception 'Solo un administrador puede aplicar descuentos';
+  end if;
+
+  select * into v_venta from public.ventas where id = p_venta_id for update;
+  if v_venta.id is null then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.estado = 'anulada' then
+    raise exception 'La venta está anulada';
+  end if;
+
+  if p_descuento_tipo is null or p_descuento_tipo = '' or p_descuento_tipo = 'ninguno' then
+    v_descuento := 0;
+  elsif p_descuento_tipo = 'porcentaje' then
+    if p_descuento_valor < 0 or p_descuento_valor > 100 then
+      raise exception 'El porcentaje de descuento debe estar entre 0 y 100';
+    end if;
+    v_descuento := round(v_venta.monto * p_descuento_valor / 100, 2);
+  elsif p_descuento_tipo = 'fijo' then
+    if p_descuento_valor < 0 then
+      raise exception 'El descuento no puede ser negativo';
+    end if;
+    v_descuento := p_descuento_valor;
+  else
+    raise exception 'Tipo de descuento inválido';
+  end if;
+
+  if v_descuento > v_venta.monto then
+    raise exception 'El descuento no puede superar el total de la orden';
+  end if;
+
+  select coalesce(sum(monto), 0) into v_pagado from public.venta_pagos where venta_id = p_venta_id;
+  if v_pagado > (v_venta.monto - v_descuento + v_venta.incremento) then
+    raise exception 'El descuento no puede dejar el total por debajo de lo ya pagado';
+  end if;
+
+  update public.ventas
+  set descuento = v_descuento,
+      estado = case when v_pagado >= (v_venta.monto - v_descuento + v_venta.incremento) then 'pagada' else 'abonada' end
+  where id = p_venta_id
+  returning * into v_venta;
+
+  return v_venta;
+end;
+$$;
+
+-- Reemplazada por registrar_certificado_runt: ya no es un simple toggle de
+-- admin, ahora exige que además se suba el archivo del certificado.
+drop function if exists public.certificar_venta(uuid);
+
+-- =========================================================
+-- REGISTRAR_CERTIFICADO_RUNT: registra que el certificado RUNT de una venta
+-- ya se subió (a `certificado_path`, en el bucket certificados-runt — el
+-- archivo en sí lo sube el cliente directo a Storage, esta función solo dev
+-- deja la constancia en la fila). Lo puede hacer un admin (cualquier sede de
+-- su organización) o un recepcionista (solo su propia sede) — a diferencia
+-- de aplicar_descuento_venta, este NO es admin-only: el recepcionista es
+-- quien normalmente hace el trámite y tiene el PDF/foto a mano. Igual que
+-- antes, solo si la venta ya está paga por completo, y de una sola vía (no
+-- hay forma de "quitar" el certificado desde la UI).
+--
+-- security definer a propósito: un recepcionista no tiene ninguna policy de
+-- UPDATE sobre una venta 'pagada' (solo sobre una 'abonada', para completar
+-- su propio abono) — este chequeo de arriba (rol + sede + saldo) reemplaza
+-- esa policy para este caso puntual. set_config dentro de la función deja
+-- una marca de una sola transacción que el trigger de abajo exige para
+-- dejar pasar el cambio a estas columnas puntuales.
+-- =========================================================
+create or replace function public.registrar_certificado_runt(
+  p_venta_id uuid,
+  p_certificado_path text
+)
+returns public.ventas
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_venta public.ventas;
+  v_pagado numeric(12, 2);
+begin
+  if public.current_role() not in ('admin', 'recepcionista') then
+    raise exception 'No autorizado';
+  end if;
+  if p_certificado_path is null or length(trim(p_certificado_path)) = 0 then
+    raise exception 'Falta el archivo del certificado';
+  end if;
+
+  select * into v_venta from public.ventas where id = p_venta_id for update;
+  if v_venta.id is null then
+    raise exception 'Venta no encontrada';
+  end if;
+  if v_venta.organization_id is distinct from public.current_org_id() then
+    raise exception 'No autorizado';
+  end if;
+  if public.current_role() = 'recepcionista' and v_venta.sede_id is distinct from public.current_sede_id() then
+    raise exception 'No autorizado para esta sede';
+  end if;
+  if v_venta.estado = 'anulada' then
+    raise exception 'La venta está anulada';
+  end if;
+  if v_venta.certificado then
+    raise exception 'Esta venta ya tiene el certificado RUNT subido';
+  end if;
+
+  select coalesce(sum(monto), 0) into v_pagado from public.venta_pagos where venta_id = p_venta_id;
+  if v_pagado < (v_venta.monto - v_venta.descuento + v_venta.incremento) then
+    raise exception 'No se puede subir el certificado: todavía queda saldo pendiente por cobrar';
+  end if;
+
+  perform set_config('app.allow_certificado_update', 'true', true);
+
+  update public.ventas
+  set certificado = true,
+      certificado_at = now(),
+      certificado_by = auth.uid(),
+      certificado_path = p_certificado_path
+  where id = p_venta_id
+  returning * into v_venta;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- Políticas de storage.objects para el bucket certificados-runt. Ruta de
+-- cada archivo: "<organization_id>/<venta_id>/<archivo>" — de ahí se lee
+-- directo con storage.foldername(name), sin depender de metadata aparte.
+-- Solo INSERT y SELECT: como venta_pagos/venta_items, es un registro de una
+-- sola vía — nadie sobreescribe ni borra un certificado ya subido.
+-- =========================================================
+drop policy if exists "certificados_runt_insert" on storage.objects;
+create policy "certificados_runt_insert" on storage.objects
+  for insert
+  with check (
+    bucket_id = 'certificados-runt'
+    and (storage.foldername(name))[1] = public.current_org_id()::text
+    and exists (
+      select 1 from public.ventas v
+      where v.id::text = (storage.foldername(name))[2]
+        and v.organization_id = public.current_org_id()
+        and (public.current_role() = 'admin' or v.sede_id = public.current_sede_id())
+    )
+  );
+
+drop policy if exists "certificados_runt_select" on storage.objects;
+create policy "certificados_runt_select" on storage.objects
+  for select
+  using (
+    bucket_id = 'certificados-runt'
+    and (storage.foldername(name))[1] = public.current_org_id()::text
+    and exists (
+      select 1 from public.ventas v
+      where v.id::text = (storage.foldername(name))[2]
+        and v.organization_id = public.current_org_id()
+        and (public.current_role() = 'admin' or v.sede_id = public.current_sede_id())
+    )
+  );
+
+-- =========================================================
+-- CREAR_COTIZACION: borrador de venta, sin caja ni pago — solo cliente +
+-- productos. security invoker: pasa por las policies normales de abajo.
+-- =========================================================
+create or replace function public.crear_cotizacion(
+  p_sede_id uuid,
+  p_cliente_id uuid,
+  p_items jsonb,
+  p_vendedor_id uuid,
+  p_referido_nombre text default null,
+  p_valida_hasta date default null
+)
+returns public.cotizaciones
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_cotizacion public.cotizaciones;
+  v_org_id uuid;
+  v_monto_total numeric(12, 2);
+  v_concepto text;
+  v_item jsonb;
+begin
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'Debe seleccionar al menos un producto';
+  end if;
+
+  select sum((item ->> 'precio')::numeric) into v_monto_total
+    from jsonb_array_elements(p_items) as item;
+  select string_agg(item ->> 'nombre', ', ' order by ordinality) into v_concepto
+    from jsonb_array_elements(p_items) with ordinality as t (item, ordinality);
+
+  v_org_id := public.current_org_id();
+
+  insert into public.cotizaciones (
+    organization_id, sede_id, cliente_id, concepto, monto, vendedor_id, referido_nombre, valida_hasta, created_by
+  )
+  values (
+    v_org_id, p_sede_id, p_cliente_id, v_concepto, v_monto_total,
+    p_vendedor_id, nullif(trim(p_referido_nombre), ''), p_valida_hasta, auth.uid()
+  )
+  returning * into v_cotizacion;
+
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    insert into public.cotizacion_items (cotizacion_id, organization_id, sede_id, producto_id, nombre, precio)
+    values (
+      v_cotizacion.id, v_org_id, p_sede_id,
+      nullif(v_item ->> 'producto_id', '')::uuid, v_item ->> 'nombre', (v_item ->> 'precio')::numeric
+    );
+  end loop;
+
+  return v_cotizacion;
+end;
+$$;
+
+-- =========================================================
+-- CONVERTIR_COTIZACION: crea la venta real (venta + venta_items +
+-- venta_pagos + caja_movimientos, igual que registrar_venta) a partir de
+-- una cotización 'pendiente', y la marca 'convertida'. Repite la lógica de
+-- registrar_venta en vez de llamarla porque los items ya están guardados
+-- en cotizacion_items, no llegan como parámetro.
+-- =========================================================
+create or replace function public.convertir_cotizacion(
+  p_cotizacion_id uuid,
+  p_pagos jsonb,
+  p_pin text default null
+)
+returns public.ventas
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_cot public.cotizaciones;
+  v_venta public.ventas;
+  v_sesion_id uuid;
+  v_monto_pagado numeric(12, 2);
+  v_pago jsonb;
+  v_pago_id uuid;
+  v_item record;
+begin
+  select * into v_cot from public.cotizaciones where id = p_cotizacion_id for update;
+  if v_cot.id is null then
+    raise exception 'Cotización no encontrada';
+  end if;
+  if v_cot.estado <> 'pendiente' then
+    raise exception 'Esta cotización ya no está pendiente';
+  end if;
+
+  if p_pagos is null or jsonb_typeof(p_pagos) <> 'array' or jsonb_array_length(p_pagos) = 0 then
+    raise exception 'Debe registrar al menos un pago';
+  end if;
+
+  select id into v_sesion_id from public.caja_sesiones
+    where sede_id = v_cot.sede_id and estado = 'abierta';
+  if v_sesion_id is null then
+    raise exception 'Debe abrir caja antes de registrar una venta';
+  end if;
+
+  select sum((pago ->> 'monto')::numeric) into v_monto_pagado
+    from jsonb_array_elements(p_pagos) as pago;
+
+  if v_monto_pagado > v_cot.monto then
+    raise exception 'El pago no puede superar el total de la orden';
+  end if;
+
+  if v_monto_pagado < v_cot.monto * 0.5 then
+    if not public.verify_org_pin(p_pin) then
+      raise exception 'Se requiere el PIN de autorización para ventas con menos del 50%% de pago inicial';
+    end if;
+  end if;
+
+  insert into public.ventas (
+    organization_id, sede_id, cliente_id, concepto, monto, estado, vendedor_id, referido_nombre, created_by
+  )
+  values (
+    v_cot.organization_id, v_cot.sede_id, v_cot.cliente_id, v_cot.concepto, v_cot.monto,
+    case when v_monto_pagado >= v_cot.monto then 'pagada' else 'abonada' end,
+    v_cot.vendedor_id, v_cot.referido_nombre, auth.uid()
+  )
+  returning * into v_venta;
+
+  for v_item in select producto_id, nombre, precio from public.cotizacion_items where cotizacion_id = p_cotizacion_id
+  loop
+    insert into public.venta_items (venta_id, organization_id, sede_id, producto_id, nombre, precio)
+    values (v_venta.id, v_cot.organization_id, v_cot.sede_id, v_item.producto_id, v_item.nombre, v_item.precio);
+  end loop;
+
+  for v_pago in select * from jsonb_array_elements(p_pagos)
+  loop
+    insert into public.venta_pagos (venta_id, organization_id, sede_id, monto, metodo_pago, comprobante_path, created_by)
+    values (
+      v_venta.id, v_cot.organization_id, v_cot.sede_id,
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', nullif(v_pago ->> 'comprobante_path', ''), auth.uid()
+    )
+    returning id into v_pago_id;
+
+    insert into public.caja_movimientos (
+      caja_sesion_id, organization_id, sede_id, tipo, concepto, monto, metodo_pago, venta_id, venta_pago_id, created_by
+    )
+    values (
+      v_sesion_id, v_cot.organization_id, v_cot.sede_id, 'ingreso', v_cot.concepto,
+      (v_pago ->> 'monto')::numeric, v_pago ->> 'metodo_pago', v_venta.id, v_pago_id, auth.uid()
+    );
+  end loop;
+
+  update public.cotizaciones set estado = 'convertida', venta_id = v_venta.id where id = p_cotizacion_id;
+
+  return v_venta;
+end;
+$$;
+
+-- =========================================================
+-- CREAR PROFILE AUTOMÁTICO al crear un auth.user (siempre vía
+-- admin.createUser + user_metadata, nunca por registro público en v1).
+--
+-- Si no viene ningún user_metadata (caso: alguien con acceso al dashboard
+-- de Supabase crea un usuario a mano, sin pasar por la app) se asume que es
+-- el bootstrap del primer platform_owner — es la única situación en la que
+-- falta metadata, ya que TODOS los flujos de la app (provisionar org,
+-- crear admin, crear recepcionista) siempre mandan role/organization_id/sede_id
+-- explícitos. Quien tiene acceso al dashboard para crear un usuario a mano
+-- ya tiene el nivel de confianza más alto posible (puede correr SQL
+-- arbitrario), así que no es una escalada de privilegios real.
+-- =========================================================
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (id, full_name, role, organization_id, sede_id)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'full_name', ''),
+    coalesce(new.raw_user_meta_data ->> 'role', 'platform_owner'),
+    nullif(new.raw_user_meta_data ->> 'organization_id', '')::uuid,
+    nullif(new.raw_user_meta_data ->> 'sede_id', '')::uuid
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- Defensa en profundidad: RLS no compara OLD vs NEW columna por columna, así
+-- que un usuario podría intentar auto-ascenderse de rol vía UPDATE sobre su
+-- propia fila (profiles_update_self permite id = auth.uid()). Este trigger
+-- bloquea cambios a columnas privilegiadas salvo que los haga platform_owner.
+create or replace function public.lock_profile_privileged_columns()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  -- auth.uid() is null cuando la escritura viene del cliente service_role
+  -- (createAdminClient()): esas rutas ya re-chequean el rol del caller a
+  -- mano en la Server Action antes de llegar acá, así que no aplican este
+  -- bloqueo — es exclusivamente para frenar que un usuario autenticado
+  -- normal se autoascienda vía la policy profiles_update_self.
+  if auth.uid() is not null and not public.is_platform_owner() and (
+    new.role is distinct from old.role
+    or new.organization_id is distinct from old.organization_id
+    or new.sede_id is distinct from old.sede_id
+    or new.active is distinct from old.active
+  ) then
+    raise exception 'No autorizado para modificar rol, organización, sede o estado de la cuenta';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_lock_privileged_columns on public.profiles;
+create trigger profiles_lock_privileged_columns
+  before update on public.profiles
+  for each row execute function public.lock_profile_privileged_columns();
+
+-- Mismo mecanismo, para ventas: un recepcionista ahora puede actualizar
+-- `estado` (registrar_abono la mueve de 'abonada' a 'pagada'), pero nunca
+-- concepto/monto/cliente/sede/organización/vendedor — eso solo un admin.
+--
+-- Las columnas certificado* van aparte: ni admin ni recepcionista pueden
+-- tocarlas por su cuenta desde una policy normal de UPDATE — el único
+-- camino válido es registrar_certificado_runt(), que antes de escribir deja
+-- la marca de sesión 'app.allow_certificado_update' (local a la
+-- transacción). Sin esa marca, cualquier intento de cambiarlas se rechaza,
+-- venga de quien venga.
+create or replace function public.lock_venta_privileged_columns()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if public.current_role() is distinct from 'admin' and (
+    new.concepto is distinct from old.concepto
+    or new.monto is distinct from old.monto
+    or new.cliente_id is distinct from old.cliente_id
+    or new.sede_id is distinct from old.sede_id
+    or new.organization_id is distinct from old.organization_id
+    or new.vendedor_id is distinct from old.vendedor_id
+    or new.referido_nombre is distinct from old.referido_nombre
+    or new.descuento is distinct from old.descuento
+  ) then
+    raise exception 'No autorizado para modificar esos campos de la venta';
+  end if;
+
+  if (
+    new.certificado is distinct from old.certificado
+    or new.certificado_at is distinct from old.certificado_at
+    or new.certificado_by is distinct from old.certificado_by
+    or new.certificado_path is distinct from old.certificado_path
+  ) and coalesce(current_setting('app.allow_certificado_update', true), '') <> 'true' then
+    raise exception 'No autorizado para modificar la certificación de esta venta';
+  end if;
+
+  -- incremento nunca se edita después de creada la venta (a diferencia del
+  -- descuento) — ni admin ni recepcionista, solo lo fija registrar_venta.
+  if new.incremento is distinct from old.incremento then
+    raise exception 'El incremento no se puede modificar después de creada la venta';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists ventas_lock_privileged_columns on public.ventas;
+create trigger ventas_lock_privileged_columns
+  before update on public.ventas
+  for each row execute function public.lock_venta_privileged_columns();
+
+-- =========================================================
+-- RLS
+-- =========================================================
+alter table public.organizations enable row level security;
+alter table public.sedes enable row level security;
+alter table public.profiles enable row level security;
+alter table public.clientes enable row level security;
+alter table public.productos enable row level security;
+alter table public.tramitadores enable row level security;
+alter table public.tramitador_pagos enable row level security;
+alter table public.tramitador_precios enable row level security;
+alter table public.ventas enable row level security;
+alter table public.venta_items enable row level security;
+alter table public.venta_pagos enable row level security;
+alter table public.cotizaciones enable row level security;
+alter table public.cotizacion_items enable row level security;
+alter table public.caja_sesiones enable row level security;
+alter table public.caja_movimientos enable row level security;
+
+-- organizations: cada quien lee la suya; platform_owner las lee todas.
+-- SIN policy de insert/update/delete a propósito: toda escritura pasa por
+-- createAdminClient() desde /platform, después de re-chequear
+-- is_platform_owner() con el cliente normal (RLS-bound).
+drop policy if exists "organizations_select_own" on public.organizations;
+create policy "organizations_select_own" on public.organizations
+  for select using (id = public.current_org_id());
+
+drop policy if exists "organizations_select_platform_owner" on public.organizations;
+create policy "organizations_select_platform_owner" on public.organizations
+  for select using (public.is_platform_owner());
+
+-- profiles
+drop policy if exists "profiles_select_self" on public.profiles;
+create policy "profiles_select_self" on public.profiles
+  for select using (id = auth.uid());
+
+drop policy if exists "profiles_select_org_admin" on public.profiles;
+create policy "profiles_select_org_admin" on public.profiles
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "profiles_select_sede_recepcionista" on public.profiles;
+create policy "profiles_select_sede_recepcionista" on public.profiles
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "profiles_select_platform_owner" on public.profiles;
+create policy "profiles_select_platform_owner" on public.profiles
+  for select using (public.is_platform_owner());
+
+drop policy if exists "profiles_update_self" on public.profiles;
+create policy "profiles_update_self" on public.profiles
+  for update using (id = auth.uid()) with check (id = auth.uid());
+
+-- sedes
+drop policy if exists "sedes_select_org" on public.sedes;
+create policy "sedes_select_org" on public.sedes
+  for select using (organization_id = public.current_org_id());
+
+drop policy if exists "sedes_insert_admin" on public.sedes;
+create policy "sedes_insert_admin" on public.sedes
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "sedes_update_admin" on public.sedes;
+create policy "sedes_update_admin" on public.sedes
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- clientes
+drop policy if exists "clientes_select_org_admin" on public.clientes;
+create policy "clientes_select_org_admin" on public.clientes
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "clientes_select_sede_recepcionista" on public.clientes;
+create policy "clientes_select_sede_recepcionista" on public.clientes
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "clientes_insert_admin" on public.clientes;
+create policy "clientes_insert_admin" on public.clientes
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "clientes_insert_recepcionista" on public.clientes;
+create policy "clientes_insert_recepcionista" on public.clientes
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "clientes_update_admin" on public.clientes;
+create policy "clientes_update_admin" on public.clientes
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- Sin policy de update para recepcionista a propósito: un recepcionista
+-- puede crear clientes (ver clientes_insert_recepcionista) pero no
+-- modificar NINGÚN campo después — ni siquiera activar/desactivar. Solo
+-- el admin corrige datos de un cliente ya cargado.
+drop policy if exists "clientes_update_recepcionista" on public.clientes;
+
+-- productos: catálogo de la organización. Cualquier miembro (admin o
+-- recepcionista) puede leerlo para elegir productos al registrar una
+-- venta; solo el admin lo mantiene.
+drop policy if exists "productos_select_org" on public.productos;
+create policy "productos_select_org" on public.productos
+  for select using (organization_id = public.current_org_id());
+
+drop policy if exists "productos_insert_admin" on public.productos;
+create policy "productos_insert_admin" on public.productos
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "productos_update_admin" on public.productos;
+create policy "productos_update_admin" on public.productos
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- tramitadores: select org-wide (un recepcionista necesita verlos para
+-- elegir uno al registrar una venta); insert/update solo admin.
+drop policy if exists "tramitadores_select_org" on public.tramitadores;
+create policy "tramitadores_select_org" on public.tramitadores
+  for select using (organization_id = public.current_org_id());
+
+drop policy if exists "tramitadores_insert_admin" on public.tramitadores;
+create policy "tramitadores_insert_admin" on public.tramitadores
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "tramitadores_update_admin" on public.tramitadores;
+create policy "tramitadores_update_admin" on public.tramitadores
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- delete: solo admin, y solo a través de eliminar_tramitador (exige PIN y
+-- bloquea el borrado si ya tiene ventas/pagos — ver esa función más abajo).
+-- La policy por sí sola no alcanza a exigir el PIN, por eso nadie borra la
+-- tabla directo desde el cliente.
+drop policy if exists "tramitadores_delete_admin" on public.tramitadores;
+create policy "tramitadores_delete_admin" on public.tramitadores
+  for delete
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- tramitador_pagos: admin ve/paga cualquiera, org-wide. Un recepcionista
+-- también puede ver y registrar pagos, pero solo a los tramitadores de su
+-- propia sede (o a los globales, sede_id null) — igual que ya puede
+-- elegirlos al registrar una venta. Nunca puede editar/borrar (inmutable,
+-- igual que venta_pagos/caja_movimientos).
+drop policy if exists "tramitador_pagos_select_admin" on public.tramitador_pagos;
+create policy "tramitador_pagos_select_admin" on public.tramitador_pagos
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "tramitador_pagos_select_recepcionista" on public.tramitador_pagos;
+create policy "tramitador_pagos_select_recepcionista" on public.tramitador_pagos
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and (sede_id is null or sede_id = public.current_sede_id())
+  );
+
+drop policy if exists "tramitador_pagos_insert_admin" on public.tramitador_pagos;
+create policy "tramitador_pagos_insert_admin" on public.tramitador_pagos
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "tramitador_pagos_insert_recepcionista" on public.tramitador_pagos;
+create policy "tramitador_pagos_insert_recepcionista" on public.tramitador_pagos
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and (sede_id is null or sede_id = public.current_sede_id())
+  );
+
+-- tramitador_precios: select org-wide (un recepcionista necesita leerlos
+-- para que la venta precargue el precio correcto); insert/update/delete
+-- solo admin.
+drop policy if exists "tramitador_precios_select_org" on public.tramitador_precios;
+create policy "tramitador_precios_select_org" on public.tramitador_precios
+  for select using (organization_id = public.current_org_id());
+
+drop policy if exists "tramitador_precios_insert_admin" on public.tramitador_precios;
+create policy "tramitador_precios_insert_admin" on public.tramitador_precios
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "tramitador_precios_update_admin" on public.tramitador_precios;
+create policy "tramitador_precios_update_admin" on public.tramitador_precios
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "tramitador_precios_delete_admin" on public.tramitador_precios;
+create policy "tramitador_precios_delete_admin" on public.tramitador_precios
+  for delete using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- ventas: un recepcionista solo puede insertar (y solo a su propio nombre);
+-- modificar/anular una venta existente es exclusivo del admin.
+drop policy if exists "ventas_select_org_admin" on public.ventas;
+create policy "ventas_select_org_admin" on public.ventas
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "ventas_select_sede_recepcionista" on public.ventas;
+create policy "ventas_select_sede_recepcionista" on public.ventas
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "ventas_insert_admin" on public.ventas;
+create policy "ventas_insert_admin" on public.ventas
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "ventas_insert_recepcionista" on public.ventas;
+create policy "ventas_insert_recepcionista" on public.ventas
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+    and vendedor_id = auth.uid()
+  );
+
+drop policy if exists "ventas_update_admin" on public.ventas;
+create policy "ventas_update_admin" on public.ventas
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+-- Un recepcionista puede actualizar una venta 'abonada' de su propia
+-- sede (para que registrar_abono la pase a 'pagada') — el trigger
+-- ventas_lock_privileged_columns de arriba impide que toque cualquier
+-- columna que no sea estado/updated_at.
+drop policy if exists "ventas_update_recepcionista_abono" on public.ventas;
+create policy "ventas_update_recepcionista_abono" on public.ventas
+  for update
+  using (
+    public.current_role() = 'recepcionista'
+    and sede_id = public.current_sede_id()
+    and estado = 'abonada'
+  )
+  with check (
+    public.current_role() = 'recepcionista'
+    and sede_id = public.current_sede_id()
+  );
+
+-- venta_pagos: inmutables, sin policy de update/delete para nadie —
+-- mismo patrón que venta_items/caja_movimientos.
+drop policy if exists "venta_pagos_select_org_admin" on public.venta_pagos;
+create policy "venta_pagos_select_org_admin" on public.venta_pagos
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "venta_pagos_select_sede_recepcionista" on public.venta_pagos;
+create policy "venta_pagos_select_sede_recepcionista" on public.venta_pagos
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "venta_pagos_insert_admin" on public.venta_pagos;
+create policy "venta_pagos_insert_admin" on public.venta_pagos
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "venta_pagos_insert_recepcionista" on public.venta_pagos;
+create policy "venta_pagos_insert_recepcionista" on public.venta_pagos
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+-- venta_items: inmutables, sin policy de update/delete para nadie —
+-- misma lógica que caja_movimientos.
+drop policy if exists "venta_items_select_org_admin" on public.venta_items;
+create policy "venta_items_select_org_admin" on public.venta_items
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "venta_items_select_sede_recepcionista" on public.venta_items;
+create policy "venta_items_select_sede_recepcionista" on public.venta_items
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "venta_items_insert_admin" on public.venta_items;
+create policy "venta_items_insert_admin" on public.venta_items
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "venta_items_insert_recepcionista" on public.venta_items;
+create policy "venta_items_insert_recepcionista" on public.venta_items
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+-- cotizaciones: a diferencia de ventas, un recepcionista SÍ puede
+-- actualizar (rechazar) las de su propia sede — todavía no hay plata de
+-- por medio. convertir_cotizacion además pone estado='convertida' y
+-- venta_id, lo que también pasa por esta misma policy de update.
+drop policy if exists "cotizaciones_select_org_admin" on public.cotizaciones;
+create policy "cotizaciones_select_org_admin" on public.cotizaciones
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "cotizaciones_select_sede_recepcionista" on public.cotizaciones;
+create policy "cotizaciones_select_sede_recepcionista" on public.cotizaciones
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "cotizaciones_insert_admin" on public.cotizaciones;
+create policy "cotizaciones_insert_admin" on public.cotizaciones
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "cotizaciones_insert_recepcionista" on public.cotizaciones;
+create policy "cotizaciones_insert_recepcionista" on public.cotizaciones
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "cotizaciones_update_admin" on public.cotizaciones;
+create policy "cotizaciones_update_admin" on public.cotizaciones
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "cotizaciones_update_sede_recepcionista" on public.cotizaciones;
+create policy "cotizaciones_update_sede_recepcionista" on public.cotizaciones
+  for update
+  using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  )
+  with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+-- cotizacion_items: inmutables, mismo patrón que venta_items.
+drop policy if exists "cotizacion_items_select_org_admin" on public.cotizacion_items;
+create policy "cotizacion_items_select_org_admin" on public.cotizacion_items
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "cotizacion_items_select_sede_recepcionista" on public.cotizacion_items;
+create policy "cotizacion_items_select_sede_recepcionista" on public.cotizacion_items
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "cotizacion_items_insert_admin" on public.cotizacion_items;
+create policy "cotizacion_items_insert_admin" on public.cotizacion_items
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "cotizacion_items_insert_recepcionista" on public.cotizacion_items;
+create policy "cotizacion_items_insert_recepcionista" on public.cotizacion_items
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+-- caja_sesiones
+drop policy if exists "caja_sesiones_select_org_admin" on public.caja_sesiones;
+create policy "caja_sesiones_select_org_admin" on public.caja_sesiones
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "caja_sesiones_select_sede_recepcionista" on public.caja_sesiones;
+create policy "caja_sesiones_select_sede_recepcionista" on public.caja_sesiones
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "caja_sesiones_insert_admin" on public.caja_sesiones;
+create policy "caja_sesiones_insert_admin" on public.caja_sesiones
+  for insert with check (
+    public.current_role() = 'admin' and organization_id = public.current_org_id() and opened_by = auth.uid()
+  );
+
+drop policy if exists "caja_sesiones_insert_recepcionista" on public.caja_sesiones;
+create policy "caja_sesiones_insert_recepcionista" on public.caja_sesiones
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+    and opened_by = auth.uid()
+  );
+
+drop policy if exists "caja_sesiones_update_admin" on public.caja_sesiones;
+create policy "caja_sesiones_update_admin" on public.caja_sesiones
+  for update
+  using (public.current_role() = 'admin' and organization_id = public.current_org_id())
+  with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "caja_sesiones_update_recepcionista" on public.caja_sesiones;
+create policy "caja_sesiones_update_recepcionista" on public.caja_sesiones
+  for update
+  using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  )
+  with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+-- caja_movimientos: libro inmutable, sin policy de update/delete para nadie.
+drop policy if exists "caja_movimientos_select_org_admin" on public.caja_movimientos;
+create policy "caja_movimientos_select_org_admin" on public.caja_movimientos
+  for select using (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "caja_movimientos_select_sede_recepcionista" on public.caja_movimientos;
+create policy "caja_movimientos_select_sede_recepcionista" on public.caja_movimientos
+  for select using (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+drop policy if exists "caja_movimientos_insert_admin" on public.caja_movimientos;
+create policy "caja_movimientos_insert_admin" on public.caja_movimientos
+  for insert with check (public.current_role() = 'admin' and organization_id = public.current_org_id());
+
+drop policy if exists "caja_movimientos_insert_recepcionista" on public.caja_movimientos;
+create policy "caja_movimientos_insert_recepcionista" on public.caja_movimientos
+  for insert with check (
+    public.current_role() = 'recepcionista'
+    and organization_id = public.current_org_id()
+    and sede_id = public.current_sede_id()
+  );
+
+-- Nota deliberada: ni sedes, ni clientes, ni ventas, ni caja_sesiones, ni
+-- caja_movimientos tienen policy alguna para platform_owner. El login del
+-- vendedor de la plataforma NO tiene acceso de lectura a los datos de
+-- ningún tenant — ver README para el detalle de esta decisión.
