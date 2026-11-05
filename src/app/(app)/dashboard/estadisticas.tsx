@@ -74,11 +74,12 @@ export function EstadisticasAdmin({
         </nav>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Dato label="Ventas" value={formatCOP(stats.ventas)} />
         <Dato label="Órdenes" value={String(stats.ordenes)} />
         <Dato label="Ticket promedio" value={formatCOP(stats.ticketPromedio)} />
         <Dato label="Por tramitador" value={`${stats.pctTramitador}%`} />
+        <Dato label="Cursos vendidos (PIN)" value={String(stats.cursos)} />
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">

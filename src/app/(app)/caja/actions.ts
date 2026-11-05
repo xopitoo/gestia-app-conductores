@@ -39,6 +39,46 @@ export async function abrirCaja(
   return {};
 }
 
+type SupabaseCtx = Awaited<ReturnType<typeof getViewerContext>>["supabase"];
+
+/** El cierre solo exige PIN en ventas desde el 5/11/2026 (00:00 Bogotá): las anteriores quedaron sin PIN y no bloquean. */
+const PINES_EXIGIDOS_DESDE = "2026-11-05T05:00:00Z";
+
+/** Cuántas ventas vivas de la sesión tienen menos PIN registrados que cursos reales en sus productos. */
+async function ventasConPinesFaltantes(supabase: SupabaseCtx, sesionId: string): Promise<number> {
+  const { data: sesion } = await supabase.from("caja_sesiones").select("sede_id, opened_at").eq("id", sesionId).maybeSingle();
+  if (!sesion) return 0;
+  const { data: ventas } = await supabase
+    .from("ventas")
+    .select("id")
+    .eq("sede_id", sesion.sede_id)
+    .gte("created_at", sesion.opened_at > PINES_EXIGIDOS_DESDE ? sesion.opened_at : PINES_EXIGIDOS_DESDE)
+    .neq("estado", "anulada");
+  const ventaIds = (ventas ?? []).map((v) => v.id);
+  if (ventaIds.length === 0) return 0;
+
+  const [{ data: items }, { data: pines }] = await Promise.all([
+    supabase.from("venta_items").select("venta_id, producto_id").in("venta_id", ventaIds),
+    supabase.from("venta_pines").select("venta_id").in("venta_id", ventaIds),
+  ]);
+  const productoIds = [...new Set((items ?? []).map((i) => i.producto_id).filter((x): x is string => !!x))];
+  if (productoIds.length === 0) return 0;
+  const { data: productos } = await supabase.from("productos").select("id, cursos_reales").in("id", productoIds);
+  const cursos = new Map((productos ?? []).map((p) => [p.id, p.cursos_reales ?? 0]));
+
+  const requeridos = new Map<string, number>();
+  for (const i of items ?? []) {
+    if (!i.producto_id) continue;
+    requeridos.set(i.venta_id, (requeridos.get(i.venta_id) ?? 0) + (cursos.get(i.producto_id) ?? 0));
+  }
+  const registrados = new Map<string, number>();
+  for (const p of pines ?? []) registrados.set(p.venta_id, (registrados.get(p.venta_id) ?? 0) + 1);
+
+  let faltantes = 0;
+  for (const [ventaId, n] of requeridos) if (n > (registrados.get(ventaId) ?? 0)) faltantes += 1;
+  return faltantes;
+}
+
 export async function cerrarCaja(
   _prevState: CajaActionState,
   formData: FormData,
@@ -49,6 +89,15 @@ export async function cerrarCaja(
 
   if (!sesionId) {
     return { error: "Sesión de caja inválida." };
+  }
+
+  // Control de PINES de curso: no se cierra la caja mientras alguna venta de
+  // la sesión tenga cursos (A2/B1/C1, combos) sin su PIN registrado.
+  const faltantes = await ventasConPinesFaltantes(supabase, sesionId);
+  if (faltantes > 0) {
+    return {
+      error: `Hay ${faltantes} ${faltantes === 1 ? "venta" : "ventas"} con curso sin PIN. Abrilas desde Ventas y registrá el PIN antes de cerrar la caja.`,
+    };
   }
 
   const { error } = await supabase

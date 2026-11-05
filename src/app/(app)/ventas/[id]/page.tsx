@@ -12,6 +12,7 @@ import { CruceTramitadorForm } from "./cruce-tramitador-form";
 import { EditarMetodoPago } from "./editar-metodo-pago";
 import { CorregirProductos } from "./corregir-productos";
 import { EditarPrecioTramitador } from "./editar-precio-tramitador";
+import { PinesForm } from "./pines-form";
 import { RuntBadge } from "@/app/(app)/clientes/runt-badge";
 import { RuntConsultaLink } from "@/components/runt-link";
 import { badgeClass, ESTADO_VENTA_LABEL, linkClass } from "@/lib/ui";
@@ -109,6 +110,21 @@ export default async function VentaDetailPage({
         }),
     ),
   );
+
+  // PINES de curso: cuántos exige la venta (según sus productos) vs. cuántos hay registrados.
+  const itemProductoIds = (items ?? []).map((i) => i.producto_id).filter((x): x is string => !!x);
+  const [{ data: productosPin }, { data: pinesVenta }] = await Promise.all([
+    itemProductoIds.length
+      ? supabase.from("productos").select("id, cursos_reales").in("id", itemProductoIds)
+      : Promise.resolve({ data: [] as { id: string; cursos_reales: number }[] }),
+    supabase.from("venta_pines").select("id, pin").eq("venta_id", id).order("created_at"),
+  ]);
+  const cursosPorProducto = new Map((productosPin ?? []).map((p) => [p.id, p.cursos_reales]));
+  const pinesRequeridos = (items ?? []).reduce(
+    (acc, i) => acc + (i.producto_id ? (cursosPorProducto.get(i.producto_id) ?? 0) : 0),
+    0,
+  );
+  const pinesFaltan = venta.estado === "anulada" ? 0 : Math.max(0, pinesRequeridos - (pinesVenta ?? []).length);
 
   const pagado = (pagos ?? []).reduce((acc, p) => acc + p.monto, 0);
   const totalNeto = venta.monto - venta.descuento + venta.incremento;
@@ -269,6 +285,22 @@ export default async function VentaDetailPage({
             ) : null}
           </div>
         </div>
+
+        {pinesRequeridos > 0 || (pinesVenta ?? []).length > 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-2">
+            <h2 className="mb-3 text-sm font-semibold text-slate-800">PIN del curso</h2>
+            {(pinesVenta ?? []).length > 0 ? (
+              <ul className="mb-3 flex flex-wrap gap-2">
+                {(pinesVenta ?? []).map((p) => (
+                  <li key={p.id} className={badgeClass("info", "md")}>
+                    {p.pin}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {pinesFaltan > 0 ? <PinesForm ventaId={venta.id} faltan={pinesFaltan} /> : null}
+          </div>
+        ) : null}
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <h2 className="mb-3 text-sm font-semibold text-slate-800">Historial de pagos</h2>

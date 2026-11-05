@@ -14,6 +14,7 @@ export type ProductoEditable = {
   descripcion: string | null;
   categoria: Categoria | null;
   precio: number;
+  cursos_reales: number;
   active: boolean;
 };
 
@@ -37,7 +38,14 @@ export function EditarProductoForm({ producto }: { producto: ProductoEditable })
         <td className="px-4 py-2.5 font-medium text-slate-800">{producto.nombre}</td>
         <td className="px-4 py-2.5 text-slate-600">{producto.descripcion ?? "—"}</td>
         <td className="px-4 py-2.5 text-slate-600 capitalize">{producto.categoria ?? "—"}</td>
-        <td className="px-4 py-2.5 text-slate-600">{formatCOP(producto.precio)}</td>
+        <td className="px-4 py-2.5 text-slate-600">
+          {formatCOP(producto.precio)}
+          {producto.cursos_reales > 0 ? (
+            <span className={`ml-2 ${badgeClass("info")}`}>
+              {producto.cursos_reales} {producto.cursos_reales === 1 ? "PIN" : "PINES"}
+            </span>
+          ) : null}
+        </td>
         <td className="px-4 py-2.5">
           <span className={badgeClass(producto.active ? "success" : "neutral")}>
             {producto.active ? "Activo" : "Inactivo"}
@@ -75,7 +83,7 @@ export function EditarProductoForm({ producto }: { producto: ProductoEditable })
         <form
           action={editarProducto}
           onSubmit={() => setEditando(false)}
-          className="grid grid-cols-1 gap-2 sm:grid-cols-5"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-6"
         >
           <input type="hidden" name="id" value={producto.id} />
           <input name="nombre" defaultValue={producto.nombre} required className={inputClass} placeholder="Nombre" />
@@ -100,6 +108,19 @@ export function EditarProductoForm({ producto }: { producto: ProductoEditable })
             className={inputClass}
             placeholder="Precio"
           />
+          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+            PINES de curso
+            <input
+              name="cursos_reales"
+              type="number"
+              min={0}
+              max={5}
+              step="1"
+              defaultValue={producto.cursos_reales}
+              className={`w-16 ${inputClass}`}
+              title="Cuántos cursos reales (PIN) incluye este producto: 0 = no pide PIN, un combo = 2"
+            />
+          </label>
           <div className="flex items-center gap-2">
             <button type="submit" className={buttonClass("primary", "sm")}>
               Guardar

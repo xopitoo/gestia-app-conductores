@@ -200,6 +200,7 @@ export function VentaForm({
   // marca explícitamente que hubo un cobro aparte, por fuera de caja (ver
   // bloque "¿Le cobró al cliente un monto distinto?" más abajo).
   const [montoCobradoTramitador, setMontoCobradoTramitador] = useState<number | null>(null);
+  const [pines, setPines] = useState<string[]>([]);
   const [categoriasLicencia, setCategoriasLicencia] = useState<string[]>([]);
 
   // Suma al set de categorías las recién detectadas en el carrito (sin
@@ -326,6 +327,13 @@ export function VentaForm({
   }
 
   const clienteSeleccionado = clientes.find((c) => c.id === clienteId);
+  // PINES de curso: un campo por cada curso real que traen los productos del carrito.
+  const pinesNecesarios = items.reduce(
+    (acc, item) => acc + (productos.find((p) => p.id === item.producto_id)?.cursos_reales ?? 0),
+    0,
+  );
+  const pinesValores = Array.from({ length: pinesNecesarios }, (_, i) => pines[i] ?? "");
+  const faltanPines = pinesValores.some((p) => !p.trim());
   const total = items.reduce((acc, item) => acc + item.precio, 0);
   const descuentoMonto =
     descuentoTipo === "porcentaje"
@@ -355,6 +363,7 @@ export function VentaForm({
       <input type="hidden" name="incremento_tipo" value={incrementoTipo} />
       <input type="hidden" name="incremento_valor" value={incrementoValor} />
       <input type="hidden" name="categorias_licencia" value={JSON.stringify(categoriasLicencia)} />
+      <input type="hidden" name="pines" value={JSON.stringify(pinesValores.map((p) => p.trim()))} />
 
       <Field label="Cliente" required>
         <select
@@ -768,6 +777,31 @@ export function VentaForm({
         </Field>
       ) : null}
 
+      {pinesNecesarios > 0 ? (
+        <div className="flex flex-col gap-2 rounded-xl border border-sky-200 bg-sky-50/60 p-3.5">
+          <p className="text-sm font-semibold text-sky-800">
+            PIN del curso — obligatorio ({pinesNecesarios} {pinesNecesarios === 1 ? "curso" : "cursos"})
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {pinesValores.map((valor, i) => (
+              <input
+                key={i}
+                value={valor}
+                onChange={(e) => {
+                  const next = [...pinesValores];
+                  next[i] = e.target.value;
+                  setPines(next);
+                }}
+                inputMode="numeric"
+                required
+                placeholder={pinesNecesarios > 1 ? `PIN del curso ${i + 1}` : "Número de PIN"}
+                className={inputClass}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {items.length > 0 ? <PagoLines key={totalNeto} total={totalNeto} allowPin /> : null}
 
       {state.error ? (
@@ -785,7 +819,9 @@ export function VentaForm({
 
       <button
         type="submit"
-        disabled={pending || items.length === 0 || items.some((item) => esItemVariable(item) && item.precio === 0)}
+        disabled={
+          pending || items.length === 0 || faltanPines || items.some((item) => esItemVariable(item) && item.precio === 0)
+        }
         className={`mt-1 ${buttonClass("primary")} w-full`}
       >
         {pending ? "Registrando..." : `Registrar orden — ${formatCOP(totalNeto)}`}

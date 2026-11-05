@@ -295,3 +295,47 @@ export async function corregirProductosVenta(
   revalidatePath("/dashboard");
   return {};
 }
+
+export type PinesFormState = {
+  error?: string;
+};
+
+/**
+ * Completa los PIN de curso de una venta que aún no los tiene (ej. se vendió
+ * antes de existir este control, o el registro de la venta quedó a medias).
+ * Cada PIN cuenta como un curso real vendido; no se pueden repetir.
+ */
+export async function agregarPinesVenta(
+  ventaId: string,
+  _prev: PinesFormState,
+  formData: FormData,
+): Promise<PinesFormState> {
+  const { supabase, profile } = await getViewerContext();
+  const pines = formData
+    .getAll("pin")
+    .map((p) => String(p ?? "").trim())
+    .filter(Boolean);
+  if (pines.length === 0) return { error: "Escribí al menos un PIN." };
+  if (new Set(pines).size !== pines.length) return { error: "Los PIN no pueden repetirse." };
+
+  const { data: venta } = await supabase.from("ventas").select("sede_id, cliente_id, estado").eq("id", ventaId).maybeSingle();
+  if (!venta || venta.estado === "anulada") return { error: "Venta no disponible." };
+
+  const { error } = await supabase.from("venta_pines").insert(
+    pines.map((pin) => ({
+      organization_id: profile.organization_id!,
+      sede_id: venta.sede_id,
+      venta_id: ventaId,
+      cliente_id: venta.cliente_id,
+      pin,
+      created_by: profile.id,
+    })),
+  );
+  if (error) {
+    return { error: error.code === "23505" ? "Alguno de esos PIN ya fue registrado en otra venta." : "No se pudieron guardar los PIN." };
+  }
+
+  revalidatePath(`/ventas/${ventaId}`);
+  revalidatePath("/caja");
+  return {};
+}

@@ -52,7 +52,7 @@ export default async function NuevaVentaPage({
       supabase.from("clientes").select(clienteColumns).eq("sede_id", sedeId).eq("active", true).order("created_at", { ascending: false }),
       supabase
         .from("productos")
-        .select("id, organization_id, sede_id, nombre, descripcion, precio, categoria, active, created_by, created_at, updated_at")
+        .select("id, organization_id, sede_id, nombre, descripcion, precio, categoria, cursos_reales, active, created_by, created_at, updated_at")
         .eq("active", true)
         .or(`sede_id.is.null,sede_id.eq.${sedeId}`)
         .order("nombre"),

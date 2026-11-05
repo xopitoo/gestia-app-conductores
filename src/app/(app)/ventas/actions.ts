@@ -7,6 +7,15 @@ import { parseItems, parsePagos } from "./parse-form-arrays";
 import { adjuntarComprobantes } from "@/lib/comprobante-pago";
 import type { DescuentoTipo } from "@/lib/supabase/types";
 
+function parsePines(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((p) => String(p ?? "").trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
 export type VentaFormState = {
   error?: string;
 };
@@ -47,6 +56,28 @@ export async function registrarVenta(
   if (items.length === 0) {
     return { error: "Elegí al menos un producto." };
   }
+  // PINES de curso: cada producto con cursos_reales > 0 (A2, B1, C1, combos)
+  // exige tantos PINES como cursos incluya — así se cuentan cursos reales.
+  const pines = parsePines(String(formData.get("pines") ?? "[]"));
+  const productoIds = items.map((i) => i.producto_id).filter((id): id is string => !!id);
+  const { data: productosPin } = productoIds.length
+    ? await supabase.from("productos").select("id, cursos_reales").in("id", productoIds)
+    : { data: [] };
+  const cursosPorProducto = new Map((productosPin ?? []).map((p) => [p.id, p.cursos_reales ?? 0]));
+  const pinesRequeridos = items.reduce((acc, i) => acc + (i.producto_id ? (cursosPorProducto.get(i.producto_id) ?? 0) : 0), 0);
+  if (pinesRequeridos > 0) {
+    if (pines.length !== pinesRequeridos || pines.some((p) => !p)) {
+      return { error: `Esta orden incluye ${pinesRequeridos} ${pinesRequeridos === 1 ? "curso" : "cursos"}: escribí ${pinesRequeridos === 1 ? "el PIN" : `los ${pinesRequeridos} PIN`} del curso.` };
+    }
+    if (new Set(pines).size !== pines.length) {
+      return { error: "Los PIN de la orden no pueden repetirse." };
+    }
+    const { data: repetidos } = await supabase.from("venta_pines").select("pin").in("pin", pines);
+    if ((repetidos ?? []).length > 0) {
+      return { error: `El PIN ${repetidos![0].pin} ya fue registrado en otra venta.` };
+    }
+  }
+
   // pagos puede venir vacío: una venta puede quedar totalmente pendiente
   // (ej. un tramitador trae gente y paga al día siguiente) — registrar_venta
   // igual exige el PIN de autorización porque $0 pagado es menos del 50%.
@@ -56,7 +87,7 @@ export async function registrarVenta(
     return { error: adjunto.error };
   }
 
-  const { error } = await supabase.rpc("registrar_venta", {
+  const { data: ventaCreada, error } = await supabase.rpc("registrar_venta", {
     p_sede_id: sedeId,
     p_cliente_id: clienteId,
     p_items: items,
@@ -96,6 +127,24 @@ export async function registrarVenta(
       return { error: "El pago no puede superar el total de la orden." };
     }
     return { error: "No se pudo registrar la venta." };
+  }
+
+  if (pinesRequeridos > 0 && ventaCreada) {
+    const { error: pinError } = await supabase.from("venta_pines").insert(
+      pines.map((pin) => ({
+        organization_id: profile.organization_id!,
+        sede_id: sedeId,
+        venta_id: ventaCreada.id,
+        cliente_id: clienteId,
+        pin,
+        created_by: profile.id,
+      })),
+    );
+    if (pinError) {
+      // La venta ya existe: se lleva a su detalle para completar los PIN ahí (no reenviar el formulario).
+      revalidatePath("/ventas");
+      redirect(`/ventas/${ventaCreada.id}`);
+    }
   }
 
   revalidatePath("/ventas");

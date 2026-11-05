@@ -175,10 +175,23 @@ export type ProductoRow = {
   descripcion: string | null;
   precio: number;
   categoria: Categoria | null;
+  /** Cuántos PINES/cursos reales incluye el producto (0 = no pide PIN; un combo = 2). */
+  cursos_reales: number;
   active: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type VentaPinRow = {
+  id: string;
+  organization_id: string;
+  sede_id: string;
+  venta_id: string;
+  cliente_id: string;
+  pin: string;
+  created_by: string;
+  created_at: string;
 };
 
 export type FinanciadoraRow = {
@@ -390,6 +403,7 @@ export type Database = {
       ventas: TableDef<VentaRow>;
       venta_items: TableDef<VentaItemRow>;
       venta_pagos: TableDef<VentaPagoRow>;
+      venta_pines: TableDef<VentaPinRow>;
       cotizaciones: TableDef<CotizacionRow>;
       cotizacion_items: TableDef<CotizacionItemRow>;
       caja_sesiones: TableDef<CajaSesionRow>;

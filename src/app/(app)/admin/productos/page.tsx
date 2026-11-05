@@ -14,7 +14,7 @@ export default async function ProductosPage() {
 
   const { data: productos } = await supabase
     .from("productos")
-    .select("id, sede_id, nombre, descripcion, precio, categoria, active")
+    .select("id, sede_id, nombre, descripcion, precio, categoria, cursos_reales, active")
     .order("nombre");
 
   const grupos = [

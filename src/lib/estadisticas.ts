@@ -69,6 +69,8 @@ export type Estadisticas = {
   ordenes: number;
   ticketPromedio: number;
   pctTramitador: number;
+  /** Cursos reales vendidos = PIN registrados en el rango (solo CEAPP). */
+  cursos: number;
   top: { nombre: string; cantidad: number }[];
   /** Órdenes por hora del día (0-23, hora de Bogotá). */
   horas: number[];
@@ -125,6 +127,25 @@ export async function getEstadisticas(supabase: Supabase, sedeId: string | null,
     const { data } = await q;
     ventas.push(...(data ?? []));
     if ((data?.length ?? 0) < 1000) break;
+  }
+
+  // Cursos reales: un PIN registrado = un curso vendido (ventas vivas del rango).
+  let cursos = 0;
+  {
+    const idsVivas = new Set(ventas.map((v) => v.id));
+    for (let from = 0; ; from += 1000) {
+      let q = supabase
+        .from("venta_pines")
+        .select("venta_id")
+        .gte("created_at", desde)
+        .lt("created_at", hasta)
+        .order("created_at")
+        .range(from, from + 999);
+      if (sedeId) q = q.eq("sede_id", sedeId);
+      const { data } = await q;
+      cursos += (data ?? []).filter((p) => idsVivas.has(p.venta_id)).length;
+      if ((data?.length ?? 0) < 1000) break;
+    }
   }
 
   const ids = new Set(ventas.map((v) => v.id));
@@ -185,6 +206,7 @@ export async function getEstadisticas(supabase: Supabase, sedeId: string | null,
     ventas: total,
     ordenes: ventas.length,
     ticketPromedio: ventas.length ? Math.round(total / ventas.length) : 0,
+    cursos,
     pctTramitador: ventas.length ? Math.round((100 * conTramitador) / ventas.length) : 0,
     top: [...conteoProductos.values()].sort((a, b) => b.cantidad - a.cantidad).slice(0, 8),
     horas,

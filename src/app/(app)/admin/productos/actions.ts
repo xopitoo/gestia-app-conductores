@@ -47,9 +47,11 @@ export async function editarProducto(formData: FormData) {
   const precio = Number(formData.get("precio") ?? 0);
   const categoria = (String(formData.get("categoria") ?? "") || null) as Categoria | null;
 
+  const cursosReales = Math.max(0, Math.floor(Number(formData.get("cursos_reales") ?? 0) || 0));
+
   if (!id || !nombre || !(precio >= 0)) return;
 
-  await supabase.from("productos").update({ nombre, descripcion, precio, categoria }).eq("id", id);
+  await supabase.from("productos").update({ nombre, descripcion, precio, categoria, cursos_reales: cursosReales }).eq("id", id);
 
   revalidatePath("/admin/productos");
   revalidatePath("/ventas/nueva");
