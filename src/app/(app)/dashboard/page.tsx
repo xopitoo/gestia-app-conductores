@@ -12,15 +12,17 @@ import { RecepcionistaDashboard } from "./recepcionista-dashboard";
 import { CarteraPorSedeChart } from "./cartera-por-sede-chart";
 import { CarteraAntiguedadChart } from "./cartera-antiguedad-chart";
 import { getTramitadoresConSaldo } from "@/lib/tramitador-saldo";
+import { getEstadisticas, rangoDe } from "@/lib/estadisticas";
+import { EstadisticasAdmin } from "./estadisticas";
 
 export const metadata: Metadata = { title: "Dashboard | Gestia App Conductores" };
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sede?: string }>;
+  searchParams: Promise<{ sede?: string; rango?: string }>;
 }) {
-  const { sede: sedeParam } = await searchParams;
+  const { sede: sedeParam, rango: rangoParam } = await searchParams;
   const ctx = await getViewerContext();
   const { supabase, profile, sedes } = ctx;
 
@@ -361,6 +363,9 @@ export default async function DashboardPage({
   if (sedeFilter) clientesQuery = clientesQuery.eq("sede_id", sedeFilter);
   const { count: clientesCount } = await clientesQuery;
 
+  const rango = rangoDe(rangoParam);
+  const estadisticas = await getEstadisticas(supabase, sedeFilter, rango);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -379,6 +384,8 @@ export default async function DashboardPage({
         <KpiCard label="Clientes activos" value={String(clientesCount ?? 0)} tone="slate" compact />
         <KpiCard label="Recaudado del mes" value={formatCOP(recaudadoMes)} tone="emerald" compact />
       </div>
+
+      <EstadisticasAdmin stats={estadisticas} sedes={sedes.map((x) => ({ id: x.id, name: x.name }))} sedeId={sedeFilter} rango={rango} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-2">
