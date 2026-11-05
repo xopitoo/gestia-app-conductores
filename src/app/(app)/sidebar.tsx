@@ -103,11 +103,9 @@ export function Sidebar({
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
               GA
             </span>
-            {!collapsed ? (
-              <span className="truncate text-sm font-semibold text-slate-900">
-                Gestia App Conductores
-              </span>
-            ) : null}
+            <span className={`truncate text-sm font-semibold text-slate-900 ${collapsed ? "sm:hidden" : ""}`}>
+              Gestia App Conductores
+            </span>
           </div>
           <button
             type="button"
@@ -152,13 +150,12 @@ export function Sidebar({
 
           {role === "admin" ? (
             <>
-              {!collapsed ? (
-                <p className="mt-4 px-3 text-[11px] font-semibold tracking-wide text-slate-400 uppercase">
-                  Administración
-                </p>
-              ) : (
-                <div className="mt-4 border-t border-slate-100" />
-              )}
+              <p
+                className={`mt-4 px-3 text-[11px] font-semibold tracking-wide text-slate-400 uppercase ${collapsed ? "sm:hidden" : ""}`}
+              >
+                Administración
+              </p>
+              {collapsed ? <div className="mt-4 hidden border-t border-slate-100 sm:block" /> : null}
               <NavLink href="/admin/sedes" icon={<Building2 className="h-4.5 w-4.5" />} collapsed={collapsed}>
                 Sedes
               </NavLink>
@@ -198,21 +195,15 @@ export function Sidebar({
             {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
           </button>
 
-          {!collapsed ? (
-            <p className="truncate px-1 pb-2 text-xs text-slate-400">{orgName}</p>
-          ) : null}
-          <div className={`flex items-center gap-2 px-1 ${collapsed ? "justify-center" : "justify-between"}`}>
-            {!collapsed ? (
-              <p className="truncate text-xs text-slate-400">{ROLE_LABEL[role]}</p>
-            ) : null}
+          <p className={`truncate px-1 pb-2 text-xs text-slate-400 ${collapsed ? "sm:hidden" : ""}`}>{orgName}</p>
+          <div className={`flex items-center gap-2 px-1 justify-between ${collapsed ? "sm:justify-center" : ""}`}>
+            <p className={`truncate text-xs text-slate-400 ${collapsed ? "sm:hidden" : ""}`}>{ROLE_LABEL[role]}</p>
             <LogoutButton />
           </div>
 
-          {!collapsed ? (
-            <p className="mt-3 truncate px-1 text-[10px] text-slate-300">
-              © {new Date().getFullYear()} Conductores App Group
-            </p>
-          ) : null}
+          <p className={`mt-3 truncate px-1 text-[10px] text-slate-300 ${collapsed ? "sm:hidden" : ""}`}>
+            © {new Date().getFullYear()} Conductores App Group
+          </p>
         </div>
       </aside>
     </>
@@ -241,10 +232,10 @@ function NavLink({
         active
           ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
           : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-      } ${collapsed ? "justify-center" : ""}`}
+      } ${collapsed ? "sm:justify-center" : ""}`}
     >
       {icon}
-      {!collapsed ? children : null}
+      <span className={collapsed ? "sm:hidden" : ""}>{children}</span>
     </Link>
   );
 }
