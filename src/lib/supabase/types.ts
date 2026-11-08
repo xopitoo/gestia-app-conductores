@@ -350,6 +350,9 @@ export type CajaSesionRow = {
   closed_at: string | null;
   opening_balance: number;
   closing_balance: number | null;
+  /** Cuándo el admin marcó que recibió el efectivo de esta caja cerrada — null = por recibir. */
+  recibida_at: string | null;
+  recibida_by: string | null;
   estado: EstadoCaja;
   created_at: string;
   updated_at: string;

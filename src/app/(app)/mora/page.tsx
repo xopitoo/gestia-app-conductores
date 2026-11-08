@@ -24,6 +24,21 @@ type Fila = {
   saldo: number;
 };
 
+/**
+ * `.in(...)` mete todos los ids en la URL: con cientos de clientes en mora la
+ * petición supera el largo permitido y falla en silencio (los nombres salían
+ * como "Cliente" y los pagos en 0). Se pide por tandas de 100 ids.
+ */
+async function porTandas<T>(
+  ids: string[],
+  pedir: (tanda: string[]) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const tandas: string[][] = [];
+  for (let i = 0; i < ids.length; i += 100) tandas.push(ids.slice(i, i + 100));
+  const resultados = await Promise.all(tandas.map((t) => pedir(t)));
+  return resultados.flatMap((r) => r.data ?? []);
+}
+
 export default async function MoraPage({
   searchParams,
 }: {
@@ -49,27 +64,42 @@ export default async function MoraPage({
   // RLS de ventas/clientes tampoco le dejaría ver otra sede.
   const sedeFilter = resolveSedeFilter(ctx, sedeParam);
 
-  let query = supabase
-    .from("ventas")
-    .select("id, sede_id, cliente_id, concepto, monto, descuento, incremento, created_at")
-    .eq("estado", "abonada")
-    .order("created_at", { ascending: true });
-  if (sedeFilter) query = query.eq("sede_id", sedeFilter);
-  const { data: ventas } = await query;
+  // PostgREST corta en 1000 filas por petición: se pagina para no perder
+  // ventas cuando hay más de 1000 abonadas.
+  const ventas: {
+    id: string;
+    sede_id: string;
+    cliente_id: string;
+    concepto: string;
+    monto: number;
+    descuento: number;
+    incremento: number;
+    created_at: string;
+  }[] = [];
+  for (let desde = 0; ; desde += 1000) {
+    let query = supabase
+      .from("ventas")
+      .select("id, sede_id, cliente_id, concepto, monto, descuento, incremento, created_at")
+      .eq("estado", "abonada")
+      .order("created_at", { ascending: true })
+      .range(desde, desde + 999);
+    if (sedeFilter) query = query.eq("sede_id", sedeFilter);
+    const { data: pagina } = await query;
+    ventas.push(...(pagina ?? []));
+    if ((pagina ?? []).length < 1000) break;
+  }
 
-  const ventaIds = (ventas ?? []).map((v) => v.id);
-  const clienteIds = [...new Set((ventas ?? []).map((v) => v.cliente_id))];
+  const ventaIds = ventas.map((v) => v.id);
+  const clienteIds = [...new Set(ventas.map((v) => v.cliente_id))];
 
-  const [{ data: pagosRows }, { data: clientesRows }, { data: productosRows }] = await Promise.all([
-    ventaIds.length
-      ? supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", ventaIds)
-      : Promise.resolve({ data: [] as { venta_id: string; monto: number }[] }),
-    clienteIds.length
-      ? supabase
-          .from("clientes")
-          .select("id, nombre_completo, numero_documento, tipo_documento, telefono, telefono_pais")
-          .in("id", clienteIds)
-      : Promise.resolve({ data: [] as { id: string; nombre_completo: string; numero_documento: string; tipo_documento: string; telefono: string | null; telefono_pais: string }[] }),
+  const [pagosRows, clientesRows, { data: productosRows }] = await Promise.all([
+    porTandas(ventaIds, (t) => supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", t)),
+    porTandas(clienteIds, (t) =>
+      supabase
+        .from("clientes")
+        .select("id, nombre_completo, numero_documento, tipo_documento, telefono, telefono_pais")
+        .in("id", t),
+    ),
     // Para armar el desplegable de "Anexar producto" (ver más abajo, ahora
     // disponible para admin y recepcionista) — admin puede ver filas de
     // varias sedes a la vez acá, así que se traen todos los catálogos
@@ -78,9 +108,9 @@ export default async function MoraPage({
   ]);
 
   const pagadoDeVenta = (id: string) =>
-    (pagosRows ?? []).filter((p) => p.venta_id === id).reduce((acc, p) => acc + p.monto, 0);
+    pagosRows.filter((p) => p.venta_id === id).reduce((acc, p) => acc + p.monto, 0);
   const sedeName = (id: string) => sedes.find((s) => s.id === id)?.name ?? "—";
-  const clienteInfo = (id: string) => clientesRows?.find((c) => c.id === id);
+  const clienteInfo = (id: string) => clientesRows.find((c) => c.id === id);
   // Mismo criterio que la pantalla de "Nueva venta": si la sede tiene su
   // propio catálogo, no se mezcla con los productos "de todas las sedes".
   const productosDeSede = (sedeId: string) => {
@@ -89,7 +119,7 @@ export default async function MoraPage({
   };
 
   const porCliente = new Map<string, { clienteId: string; filas: Fila[]; totalSaldo: number }>();
-  for (const v of ventas ?? []) {
+  for (const v of ventas) {
     const pagado = pagadoDeVenta(v.id);
     const saldo = v.monto - v.descuento + v.incremento - pagado;
     if (saldo <= 0) continue;

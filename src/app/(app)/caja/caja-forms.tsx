@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
-import { abrirCaja, cerrarCaja, registrarEgreso, type CajaActionState } from "./actions";
+import { useActionState, useState, useTransition } from "react";
+import { abrirCaja, cerrarCaja, marcarCajaRecibida, registrarEgreso, type CajaActionState } from "./actions";
 import { METODO_PAGO_LABEL, METODO_PAGO_SELECCIONABLE } from "@/lib/supabase/types";
 import { buttonClass } from "@/lib/ui";
 
@@ -112,5 +112,30 @@ export function RegistrarEgresoForm({
         <p className="col-span-full text-xs text-red-600">{state.error}</p>
       ) : null}
     </form>
+  );
+}
+
+export function RecibirCajaButton({ sesionId, recibida }: { sesionId: string; recibida: boolean }) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        title={error ?? undefined}
+        onClick={() =>
+          startTransition(async () => {
+            const res = await marcarCajaRecibida(sesionId, !recibida);
+            setError(res.error ?? null);
+          })
+        }
+        className={buttonClass(recibida ? "secondary" : "success", "sm")}
+      >
+        {pending ? "..." : recibida ? "Desmarcar" : "Marcar recibida"}
+      </button>
+      {error ? <span className="block text-xs text-red-600">{error}</span> : null}
+    </>
   );
 }

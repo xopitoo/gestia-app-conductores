@@ -5,7 +5,7 @@ import { getViewerContext, resolveSedeId } from "@/lib/viewer";
 import { SedeSelect } from "@/components/sede-select";
 import { formatCOP, formatDateTime } from "@/lib/format";
 import { bogotaTodayRange } from "@/lib/bogota-date";
-import { AbrirCajaForm, CerrarCajaForm, RegistrarEgresoForm } from "./caja-forms";
+import { AbrirCajaForm, CerrarCajaForm, RecibirCajaButton, RegistrarEgresoForm } from "./caja-forms";
 import { METODO_PAGO_LABEL, type CajaMovimientoRow } from "@/lib/supabase/types";
 import { badgeClass, linkClass } from "@/lib/ui";
 
@@ -51,7 +51,7 @@ export default async function CajaPage({
   // de que termine el día de hoy.
   let historialQuery = supabase
     .from("caja_sesiones")
-    .select("id, opened_at, closed_at, opening_balance, closing_balance, estado, closed_by")
+    .select("id, opened_at, closed_at, opening_balance, closing_balance, estado, closed_by, recibida_at")
     .eq("sede_id", sedeId)
     .order("opened_at", { ascending: false });
   historialQuery =
@@ -207,6 +207,7 @@ export default async function CajaPage({
                   <th className="py-2 pr-3">Estado</th>
                   <th className="py-2 pr-3">Ingresos</th>
                   <th className="py-2 pr-3">Egresos</th>
+                  <th className="py-2 pr-3">Recepción</th>
                   <th className="py-2 pr-3" />
                 </tr>
               </thead>
@@ -236,6 +237,23 @@ export default async function CajaPage({
                       </td>
                       <td className="py-2 pr-3 text-emerald-600">{formatCOP(totals.ingresos)}</td>
                       <td className="py-2 pr-3 text-red-600">{formatCOP(totals.egresos)}</td>
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        {s.estado === "cerrada" ? (
+                          <div className="flex flex-col items-start gap-1">
+                            <span className={badgeClass(s.recibida_at ? "success" : "warning")}>
+                              {s.recibida_at ? "Recibida" : "Por recibir"}
+                            </span>
+                            {s.recibida_at ? (
+                              <span className="text-xs text-slate-400">{formatDateTime(s.recibida_at)}</span>
+                            ) : null}
+                            {profile.role === "admin" ? (
+                              <RecibirCajaButton sesionId={s.id} recibida={!!s.recibida_at} />
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
                       <td className="py-2 pr-3 text-right whitespace-nowrap">
                         {s.estado === "cerrada" ? (
                           <Link
@@ -252,7 +270,7 @@ export default async function CajaPage({
                 })}
                 {(historial ?? []).length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-400">
+                    <td colSpan={7} className="py-6 text-center text-slate-400">
                       {profile.role === "admin"
                         ? "Sin cajas registradas todavía."
                         : "Todavía no se abrió una caja hoy."}

@@ -160,3 +160,32 @@ export async function registrarEgreso(
   revalidatePath("/caja");
   return {};
 }
+
+/** Solo admin: marca (o desmarca) que recibió el efectivo de una caja ya cerrada. */
+export async function marcarCajaRecibida(sesionId: string, recibida: boolean): Promise<CajaActionState> {
+  const { supabase, profile } = await getViewerContext();
+  if (profile.role !== "admin") {
+    return { error: "Solo un administrador puede marcar cajas como recibidas." };
+  }
+
+  const { data: sesion } = await supabase
+    .from("caja_sesiones")
+    .select("estado")
+    .eq("id", sesionId)
+    .maybeSingle();
+  if (!sesion) return { error: "No se encontró la caja." };
+  if (sesion.estado !== "cerrada") return { error: "La caja todavía está abierta." };
+
+  const { error } = await supabase
+    .from("caja_sesiones")
+    .update(
+      recibida
+        ? { recibida_at: new Date().toISOString(), recibida_by: profile.id }
+        : { recibida_at: null, recibida_by: null },
+    )
+    .eq("id", sesionId);
+  if (error) return { error: "No se pudo actualizar la caja." };
+
+  revalidatePath("/caja");
+  return {};
+}
