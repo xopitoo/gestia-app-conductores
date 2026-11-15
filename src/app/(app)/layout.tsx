@@ -3,6 +3,8 @@ import { calcularProximosCumpleanos } from "@/lib/cumpleanos";
 import { calcularProximosVencimientosLicencia } from "@/lib/licencias";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
+import { NavidadDecor } from "@/components/navidad-decor";
+import { esNavidad } from "@/lib/navidad";
 
 export default async function AppLayout({
   children,
@@ -70,9 +72,13 @@ export default async function AppLayout({
   const sedesConMoraIds = sedes.filter((s) => SEDES_CON_MORA.includes(s.name)).map((s) => s.id);
   const puedeVerMora = profile.role === "admin" || sedesConMoraIds.includes(profile.sede_id ?? "");
 
+  const navidad = esNavidad();
+
   return (
     <div className="flex min-h-svh gap-3 bg-gradient-to-br from-indigo-100 via-slate-50 to-pink-100 p-0 sm:p-3 print:block print:bg-white print:p-0">
+      {navidad ? <NavidadDecor /> : null}
       <Sidebar
+        navidad={navidad}
         role={profile.role as "admin" | "recepcionista"}
         orgName={organization.name}
         showMora={puedeVerMora}

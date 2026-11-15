@@ -17,3 +17,144 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Vidrio líquido (estilo Apple): el fondo lleva manchas de color índigo,
+   violeta y azul (la familia del color de Gestia) y todo lo que está encima
+   es vidrio translúcido con desenfoque, brillo en el borde superior y reflejo.
+   Solo en pantalla: los recibos y facturas se imprimen en blanco. */
+@media screen {
+  body {
+    background:
+      radial-gradient(38rem 30rem at 8% 6%, #8f7bff66, transparent 65%),
+      radial-gradient(34rem 28rem at 92% 12%, #bfb0fc80, transparent 65%),
+      radial-gradient(40rem 32rem at 70% 100%, #a78bfa4d, transparent 65%),
+      radial-gradient(30rem 26rem at 0% 90%, #8f7bff40, transparent 65%),
+      #f4f0ff;
+    background-attachment: fixed;
+  }
+
+  /* Paneles grandes: contenedor principal y menú lateral */
+  main.bg-white\/70 {
+    background-color: #ffffff47;
+    -webkit-backdrop-filter: blur(24px) saturate(170%);
+    backdrop-filter: blur(24px) saturate(170%);
+    border: 1px solid #ffffff8c;
+    box-shadow:
+      inset 0 1px 0 #ffffffcc,
+      0 10px 40px -16px #7c5cff55;
+  }
+
+  /* Tarjetas */
+  main .rounded-2xl.bg-white,
+  main .rounded-xl.bg-white {
+    background-color: transparent;
+    background-image:
+      linear-gradient(115deg, #ffffff52 0%, #ffffff1f 38%, #ede9fe33 70%, #bfb0fc40 100%);
+    -webkit-backdrop-filter: blur(14px) saturate(190%);
+    backdrop-filter: blur(14px) saturate(190%);
+    border-color: #ffffff80;
+    border-radius: 1.5rem;
+    box-shadow:
+      inset 0 1px 0 #ffffffe6,
+      inset 0 -1px 0 #8f7bff26,
+      0 1px 2px #1e1b4b0d,
+      0 12px 32px -14px #7c5cff55;
+    transition: box-shadow 0.2s, transform 0.2s;
+  }
+
+  main a.rounded-2xl.bg-white:hover,
+  main a.rounded-xl.bg-white:hover,
+  main button.rounded-2xl.bg-white:hover {
+    box-shadow:
+      inset 0 1px 0 #fff,
+      inset 0 -1px 0 #8f7bff26,
+      0 18px 36px -12px #7c5cff70;
+    transform: translateY(-2px);
+  }
+
+  /* El menú lateral es vidrio solo en escritorio; en el celular es un cajón opaco. */
+  @media (min-width: 640px) {
+    aside[class*="sm:bg-white/70"] {
+      background-color: transparent;
+      background-image: linear-gradient(170deg, #ddd6feb3 0%, #bfb0fc99 55%, #a78bfa80 100%);
+      -webkit-backdrop-filter: blur(24px) saturate(170%);
+      backdrop-filter: blur(24px) saturate(170%);
+      border: 1px solid #ffffff8c;
+      border-radius: 1.75rem;
+      box-shadow:
+        inset 0 1px 0 #ffffffcc,
+        0 10px 40px -16px #7c5cff66;
+    }
+
+    /* Textos grises del menú: más oscuros para que se lean sobre el lavanda */
+    aside[class*="sm:bg-white/70"] .text-slate-300,
+    aside[class*="sm:bg-white/70"] .text-slate-400,
+    aside[class*="sm:bg-white/70"] .text-slate-500 {
+      color: #3b2f7a;
+    }
+    aside[class*="sm:bg-white/70"] .text-slate-600,
+    aside[class*="sm:bg-white/70"] .text-slate-700 {
+      color: #281f5c;
+    }
+  }
+}
+
+/* Temporada navideña (diciembre): luces y nieve. No se imprimen. */
+.xmas-decor {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+}
+.xmas-lights {
+  position: absolute;
+  top: -6px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 4px;
+  list-style: none;
+  margin: 0;
+  border-top: 2px solid #6b21a8aa;
+}
+.xmas-lights li {
+  width: 9px;
+  height: 14px;
+  margin-top: 1px;
+  border-radius: 50% 50% 55% 55%;
+  background: var(--luz, #f87171);
+  box-shadow: 0 0 10px 3px var(--luz, #f87171);
+  animation: xmas-parpadeo 2.1s ease-in-out infinite;
+}
+.xmas-lights li:nth-child(4n + 1) { --luz: #f87171; }
+.xmas-lights li:nth-child(4n + 2) { --luz: #fbbf24; }
+.xmas-lights li:nth-child(4n + 3) { --luz: #4ade80; }
+.xmas-lights li:nth-child(4n) { --luz: #60a5fa; }
+@keyframes xmas-parpadeo {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.xmas-snow span {
+  position: absolute;
+  top: -12px;
+  border-radius: 9999px;
+  background: #ffffffd9;
+  box-shadow: 0 0 6px #ffffff, 0 0 2px #8f7bff66;
+  animation-name: xmas-nieve;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes xmas-nieve {
+  0% { transform: translate(0, -5vh); }
+  50% { transform: translate(var(--sway), 55vh); }
+  100% { transform: translate(calc(var(--sway) * -1), 108vh); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .xmas-snow { display: none; }
+  .xmas-lights li { animation: none; }
+}
+@media print {
+  .xmas-decor { display: none; }
+}

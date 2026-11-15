@@ -1,5 +1,6 @@
 "use client";
 
+import { GorroNavidad } from "@/components/navidad-decor";
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -37,10 +38,13 @@ const STORAGE_KEY = "conductores-pos:sidebar-collapsed";
 export function Sidebar({
   role,
   orgName,
+  navidad = false,
   showMora,
 }: {
   role: "admin" | "recepcionista";
   orgName: string;
+  /** Diciembre: gorro de Papá Noel sobre el logo. */
+  navidad?: boolean;
   /** Admin siempre; recepcionista solo si su sede tiene la mora activada (hoy, solo CEAPP CALI). */
   showMora: boolean;
 }) {
@@ -98,15 +102,24 @@ export function Sidebar({
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         } ${collapsed ? "sm:w-16" : "sm:w-60"}`}
       >
-        <div className="flex h-16 items-center justify-between gap-2 border-b border-slate-200 px-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
+        <div className={`flex h-16 items-center justify-between gap-2 border-b border-slate-200 px-3 ${collapsed ? "sm:justify-center" : ""}`}>
+          <div className={`flex min-w-0 items-center gap-2 ${collapsed ? "sm:hidden" : ""}`}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center relative rounded-lg bg-indigo-600 text-sm font-bold text-white">
               GA
+              {navidad ? <GorroNavidad /> : null}
             </span>
             <span className={`truncate text-sm font-semibold text-slate-900 ${collapsed ? "sm:hidden" : ""}`}>
               Gestia App Conductores
             </span>
           </div>
+          <button
+            type="button"
+            onClick={toggle}
+            title={collapsed ? "Expandir menú" : "Contraer menú"}
+            className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/50 hover:text-slate-700 sm:flex"
+          >
+            {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+          </button>
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
@@ -186,15 +199,6 @@ export function Sidebar({
         </nav>
 
         <div className="border-t border-slate-200 p-3">
-          <button
-            type="button"
-            onClick={toggle}
-            title={collapsed ? "Expandir menú" : "Contraer menú"}
-            className="mb-2 hidden h-8 w-full items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 sm:flex"
-          >
-            {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
-          </button>
-
           <p className={`truncate px-1 pb-2 text-xs text-slate-400 ${collapsed ? "sm:hidden" : ""}`}>{orgName}</p>
           <div className={`flex items-center gap-2 px-1 justify-between ${collapsed ? "sm:justify-center" : ""}`}>
             <p className={`truncate text-xs text-slate-400 ${collapsed ? "sm:hidden" : ""}`}>{ROLE_LABEL[role]}</p>
