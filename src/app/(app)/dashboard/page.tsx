@@ -17,6 +17,18 @@ import { EstadisticasAdmin } from "./estadisticas";
 
 export const metadata: Metadata = { title: "Dashboard | Gestia App Conductores" };
 
+/** PostgREST corta cada consulta en 1000 filas: se recorre por páginas para no
+ * perder ventas, pagos o ítems (con más de 1000 filas los totales salían mal). */
+async function todas<T>(armar: (desde: number, hasta: number) => PromiseLike<{ data: T[] | null }>): Promise<T[]> {
+  const filas: T[] = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data } = await armar(desde, desde + 999);
+    filas.push(...(data ?? []));
+    if ((data?.length ?? 0) < 1000) break;
+  }
+  return filas;
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -136,14 +148,16 @@ export default async function DashboardPage({
   // Todas las ventas de los últimos dos años en un solo fetch: de acá salen
   // los KPIs de hoy/mes, la comparación mensual año actual vs anterior, y
   // (vía venta_items) el conteo de cursos y el ranking por año.
-  let ventasAniosQuery = supabase
-    .from("ventas")
-    .select("id, monto, created_at")
-    .gte("created_at", inicioAnioAnterior.toISOString())
-    .lt("created_at", inicioAnioSiguiente.toISOString())
-    .neq("estado", "anulada");
-  if (sedeFilter) ventasAniosQuery = ventasAniosQuery.eq("sede_id", sedeFilter);
-  const { data: ventasAnios } = await ventasAniosQuery;
+  const ventasAnios = await todas((a, b) => {
+    let q = supabase
+      .from("ventas")
+      .select("id, monto, created_at")
+      .gte("created_at", inicioAnioAnterior.toISOString())
+      .lt("created_at", inicioAnioSiguiente.toISOString())
+      .neq("estado", "anulada");
+    if (sedeFilter) q = q.eq("sede_id", sedeFilter);
+    return q.order("id").range(a, b);
+  });
 
   const actualPorMes = Array(12).fill(0) as number[];
   const anteriorPorMes = Array(12).fill(0) as number[];
@@ -167,19 +181,24 @@ export default async function DashboardPage({
 
   // Saldo pendiente: ventas abonadas (no acotado a los últimos dos años a
   // propósito — es un saldo corriente, no algo del período).
-  let abonadasQuery = supabase.from("ventas").select("id, monto, descuento, incremento").eq("estado", "abonada");
-  if (sedeFilter) abonadasQuery = abonadasQuery.eq("sede_id", sedeFilter);
-  const { data: abonadas } = await abonadasQuery;
-  const abonadaIds = (abonadas ?? []).map((v) => v.id);
-  const { data: pagosDeAbonadas } = abonadaIds.length
-    ? await supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", abonadaIds)
-    : { data: [] };
-  const pendiente = (abonadas ?? []).reduce((acc, v) => {
-    const pagado = (pagosDeAbonadas ?? [])
-      .filter((p) => p.venta_id === v.id)
-      .reduce((a, p) => a + p.monto, 0);
-    return acc + (v.monto - v.descuento + v.incremento - pagado);
-  }, 0);
+  const abonadas = await todas((a, b) => {
+    let q = supabase.from("ventas").select("id, monto, descuento, incremento").eq("estado", "abonada");
+    if (sedeFilter) q = q.eq("sede_id", sedeFilter);
+    return q.order("id").range(a, b);
+  });
+  // Todos los pagos (de la sede filtrada) sumados por venta, una sola vez.
+  const pagadoPorVenta = new Map<string, number>();
+  for (const p of await todas((a, b) => {
+    let q = supabase.from("venta_pagos").select("venta_id, monto");
+    if (sedeFilter) q = q.eq("sede_id", sedeFilter);
+    return q.order("id").range(a, b);
+  })) {
+    pagadoPorVenta.set(p.venta_id, (pagadoPorVenta.get(p.venta_id) ?? 0) + p.monto);
+  }
+  const pendiente = abonadas.reduce(
+    (acc, v) => acc + (v.monto - v.descuento + v.incremento - (pagadoPorVenta.get(v.id) ?? 0)),
+    0,
+  );
 
   // Cartera pendiente de alumnos de escuela — nunca C.R.C. Valorar, que no
   // vende cursos. Si el admin filtró a una sede puntual, se ve solo esa
@@ -189,30 +208,18 @@ export default async function DashboardPage({
     ? sedes.filter((s) => s.id === sedeFilter && s.name !== "C.R.C. VALORAR")
     : sedes.filter((s) => s.name !== "C.R.C. VALORAR");
   const sedeEscuelaIds = sedesEscuela.map((s) => s.id);
-  const { data: carteraVentas } = sedeEscuelaIds.length
-    ? await supabase
-        .from("ventas")
-        .select("id, sede_id, cliente_id, monto, descuento, incremento, created_at")
-        .eq("estado", "abonada")
-        .in("sede_id", sedeEscuelaIds)
-    : {
-        data: [] as {
-          id: string;
-          sede_id: string;
-          cliente_id: string;
-          monto: number;
-          descuento: number;
-          incremento: number;
-          created_at: string;
-        }[],
-      };
-
-  const carteraVentaIds = (carteraVentas ?? []).map((v) => v.id);
-  const { data: carteraPagos } = carteraVentaIds.length
-    ? await supabase.from("venta_pagos").select("venta_id, monto").in("venta_id", carteraVentaIds)
-    : { data: [] as { venta_id: string; monto: number }[] };
-  const pagadoDeCarteraVenta = (id: string) =>
-    (carteraPagos ?? []).filter((p) => p.venta_id === id).reduce((acc, p) => acc + p.monto, 0);
+  const carteraVentas = sedeEscuelaIds.length
+    ? await todas((a, b) =>
+        supabase
+          .from("ventas")
+          .select("id, sede_id, cliente_id, monto, descuento, incremento, created_at")
+          .eq("estado", "abonada")
+          .in("sede_id", sedeEscuelaIds)
+          .order("id")
+          .range(a, b),
+      )
+    : [];
+  const pagadoDeCarteraVenta = (id: string) => pagadoPorVenta.get(id) ?? 0;
 
   const ANTIGUEDAD_BUCKETS = ["0-15 días", "16-30 días", "31-60 días", "61+ días"] as const;
   const carteraPorSedeMap = new Map<string, { monto: number; clientes: Set<string> }>();
@@ -303,10 +310,15 @@ export default async function DashboardPage({
 
   // Cursos vendidos y ranking: por producto/ítem, no por venta (una venta
   // puede tener varios cursos).
-  const ventaIdsAnios = (ventasAnios ?? []).map((v) => v.id);
-  const { data: itemsAnios } = ventaIdsAnios.length
-    ? await supabase.from("venta_items").select("venta_id, nombre, precio").in("venta_id", ventaIdsAnios)
-    : { data: [] };
+  const itemsAnios = await todas((a, b) => {
+    let q = supabase
+      .from("venta_items")
+      .select("venta_id, nombre, precio")
+      .gte("created_at", inicioAnioAnterior.toISOString())
+      .lt("created_at", inicioAnioSiguiente.toISOString());
+    if (sedeFilter) q = q.eq("sede_id", sedeFilter);
+    return q.order("id").range(a, b);
+  });
 
   let cursosAnioActual = 0;
   let cursosAnioAnterior = 0;
@@ -333,13 +345,15 @@ export default async function DashboardPage({
   // gráfico diario) como el mes completo (para recaudado + forma de pago),
   // arrancando desde lo que sea más temprano de los dos.
   const desdePagos = inicioSemana < inicioMes ? inicioSemana : inicioMes;
-  let pagosQuery = supabase
-    .from("venta_pagos")
-    .select("monto, metodo_pago, sede_id, created_at")
-    .gte("created_at", desdePagos.toISOString())
-    .lt("created_at", finMes.toISOString());
-  if (sedeFilter) pagosQuery = pagosQuery.eq("sede_id", sedeFilter);
-  const { data: pagos } = await pagosQuery;
+  const pagos = await todas((a, b) => {
+    let q = supabase
+      .from("venta_pagos")
+      .select("monto, metodo_pago, sede_id, created_at")
+      .gte("created_at", desdePagos.toISOString())
+      .lt("created_at", finMes.toISOString());
+    if (sedeFilter) q = q.eq("sede_id", sedeFilter);
+    return q.order("id").range(a, b);
+  });
 
   const recaudadoMes = (pagos ?? [])
     .filter((p) => new Date(p.created_at) >= inicioMes)
