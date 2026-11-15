@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export type LoginState = {
   error?: string;
@@ -20,8 +21,13 @@ export async function login(
   }
 
   const supabase = await createClient();
+  // El bloqueo por intentos fallidos se maneja con service role: si
+  // check_login_lockout / record_login_attempt fueran públicas, cualquiera
+  // con la anon key (que es pública) podría bloquear a otro usuario o borrar
+  // sus intentos fallidos llamando la función directo.
+  const lockoutDb = createAdminClient();
 
-  const { data: lockout } = await supabase.rpc("check_login_lockout", {
+  const { data: lockout } = await lockoutDb.rpc("check_login_lockout", {
     p_email: email,
   });
   if (lockout?.locked) {
@@ -36,7 +42,7 @@ export async function login(
     password,
   });
 
-  await supabase.rpc("record_login_attempt", {
+  await lockoutDb.rpc("record_login_attempt", {
     p_email: email,
     p_success: !error,
   });
@@ -45,7 +51,9 @@ export async function login(
     return { error: "Email o contraseña incorrectos." };
   }
 
-  redirect(redirectTo.startsWith("/") ? redirectTo : "/");
+  // "//otro-sitio.com" también empieza con "/" pero es una URL a otro dominio.
+  const destinoSeguro = redirectTo.startsWith("/") && !redirectTo.startsWith("//") && !redirectTo.includes("\\");
+  redirect(destinoSeguro ? redirectTo : "/");
 }
 
 export async function logout() {

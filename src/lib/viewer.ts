@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import type { OrganizationRow, ProfileRow, SedeRow } from "@/lib/supabase/types";
 
@@ -12,6 +13,8 @@ export type ViewerContext = {
   organization: OrganizationRow;
   /** Sedes activas de la organización. Para 'recepcionista' siempre trae solo la propia. */
   sedes: SedeRow[];
+  /** Última sede que el admin eligió en el selector (cookie); se usa cuando la URL no trae ?sede=. */
+  sedePreferida?: string;
 };
 
 /**
@@ -54,11 +57,23 @@ export const getViewerContext = cache(async (): Promise<ViewerContext> => {
     redirect("/login");
   }
 
-  const { data: organization } = await supabase
-    .from("organizations")
-    .select("id, name, slug, active, created_at, updated_at")
-    .eq("id", profile.organization_id)
-    .single();
+  // La org y las sedes no dependen una de otra: se piden en paralelo (cada
+  // navegación pasa por acá, y cada ida y vuelta a la base suma).
+  const sedesQuery = supabase
+    .from("sedes")
+    .select("id, organization_id, name, address, active, created_at, updated_at")
+    .eq("organization_id", profile.organization_id)
+    .eq("active", true)
+    .order("name");
+
+  const [{ data: organization }, { data: sedes }] = await Promise.all([
+    supabase
+      .from("organizations")
+      .select("id, name, slug, active, created_at, updated_at")
+      .eq("id", profile.organization_id)
+      .single(),
+    profile.role === "recepcionista" && profile.sede_id ? sedesQuery.eq("id", profile.sede_id) : sedesQuery,
+  ]);
 
   if (!organization || !organization.active) {
     await supabase.auth.signOut();
@@ -69,18 +84,6 @@ export const getViewerContext = cache(async (): Promise<ViewerContext> => {
     redirect("/elegir-sede");
   }
 
-  const sedesQuery = supabase
-    .from("sedes")
-    .select("id, organization_id, name, address, active, created_at, updated_at")
-    .eq("organization_id", profile.organization_id)
-    .eq("active", true)
-    .order("name");
-
-  const { data: sedes } =
-    profile.role === "recepcionista" && profile.sede_id
-      ? await sedesQuery.eq("id", profile.sede_id)
-      : await sedesQuery;
-
   return {
     supabase,
     userId: user.id,
@@ -88,18 +91,20 @@ export const getViewerContext = cache(async (): Promise<ViewerContext> => {
     profile: profile as ProfileRow,
     organization: organization as OrganizationRow,
     sedes: sedes ?? [],
+    sedePreferida: (await cookies()).get("gestia_sede")?.value,
   };
 });
 
 /** Resuelve la sede sobre la que opera la página actual (siempre una sede
  * concreta — para páginas como Caja, donde no existe un "todas las sedes"). */
 export function resolveSedeId(
-  ctx: Pick<ViewerContext, "profile" | "sedes">,
+  ctx: Pick<ViewerContext, "profile" | "sedes" | "sedePreferida">,
   requestedSedeId?: string,
 ): string | null {
   if (ctx.profile.role === "recepcionista") {
     return ctx.profile.sede_id;
   }
+  requestedSedeId = requestedSedeId || ctx.sedePreferida;
   if (requestedSedeId && ctx.sedes.some((s) => s.id === requestedSedeId)) {
     return requestedSedeId;
   }
@@ -109,12 +114,13 @@ export function resolveSedeId(
 /** Resuelve el filtro de sede para páginas agregadas (Ventas): null =
  * "todas las sedes" de la organización, solo posible para un admin. */
 export function resolveSedeFilter(
-  ctx: Pick<ViewerContext, "profile" | "sedes">,
+  ctx: Pick<ViewerContext, "profile" | "sedes" | "sedePreferida">,
   requestedSedeId?: string,
 ): string | null {
   if (ctx.profile.role === "recepcionista") {
     return ctx.profile.sede_id;
   }
+  requestedSedeId = requestedSedeId || ctx.sedePreferida;
   if (!requestedSedeId || requestedSedeId === "all") {
     return null;
   }

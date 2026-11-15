@@ -24,7 +24,6 @@ export default async function AppLayout({
   if (profile.role === "recepcionista" && profile.sede_id) {
     pendientesQuery = pendientesQuery.eq("sede_id", profile.sede_id);
   }
-  const { count: pendientesCount } = await pendientesQuery;
 
   // Cumpleaños de clientes (hoy o en la próxima semana) — la otra mitad de
   // la campana, pensada como base para cuando exista un módulo de
@@ -37,8 +36,6 @@ export default async function AppLayout({
   if (profile.role === "recepcionista" && profile.sede_id) {
     clientesQuery = clientesQuery.eq("sede_id", profile.sede_id);
   }
-  const { data: clientesConFecha } = await clientesQuery;
-  const cumpleanos = calcularProximosCumpleanos(clientesConFecha ?? []);
 
   // Vencimientos de licencia (particular y/o público) — misma idea que los
   // cumpleaños: gente que se inscribió en una sede CEAPP o renovó en C.R.C.
@@ -53,7 +50,13 @@ export default async function AppLayout({
   if (profile.role === "recepcionista" && profile.sede_id) {
     clientesLicenciaQuery = clientesLicenciaQuery.eq("sede_id", profile.sede_id);
   }
-  const { data: clientesConLicencia } = await clientesLicenciaQuery;
+  // Las tres consultas de la campana son independientes: en paralelo, no una tras otra.
+  const [{ count: pendientesCount }, { data: clientesConFecha }, { data: clientesConLicencia }] = await Promise.all([
+    pendientesQuery,
+    clientesQuery,
+    clientesLicenciaQuery,
+  ]);
+  const cumpleanos = calcularProximosCumpleanos(clientesConFecha ?? []);
   const sedeValorarId = sedes.find((s) => s.name === "C.R.C. VALORAR")?.id;
   const vencimientosLicencia = calcularProximosVencimientosLicencia(
     (clientesConLicencia ?? []).map((c) => ({ ...c, es_valorar: c.sede_id === sedeValorarId })),

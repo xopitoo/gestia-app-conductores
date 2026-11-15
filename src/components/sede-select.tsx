@@ -23,6 +23,7 @@ export function SedeSelect({
     <select
       value={currentSedeId ?? "all"}
       onChange={(e) => {
+        document.cookie = `gestia_sede=${e.target.value}; path=/; max-age=31536000; samesite=lax`;
         const params = new URLSearchParams(searchParams.toString());
         params.set("sede", e.target.value);
         router.push(`${pathname}?${params.toString()}`);

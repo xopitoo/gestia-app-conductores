@@ -69,7 +69,7 @@ export type Estadisticas = {
   ordenes: number;
   ticketPromedio: number;
   pctTramitador: number;
-  /** Cursos reales vendidos = PIN registrados en el rango (solo CEAPP). */
+  /** Cursos reales vendidos = PIN con fecha dentro del rango (solo CEAPP). */
   cursos: number;
   top: { nombre: string; cantidad: number }[];
   /** Órdenes por hora del día (0-23, hora de Bogotá). */
@@ -129,23 +129,50 @@ export async function getEstadisticas(supabase: Supabase, sedeId: string | null,
     if ((data?.length ?? 0) < 1000) break;
   }
 
-  // Cursos reales: un PIN registrado = un curso vendido (ventas vivas del rango).
+  // Cursos reales: un PIN = un curso vendido, en la fecha que trae el propio
+  // PIN (AAMMDD, día de Bogotá) y no la del registro ni la de la venta. Así un
+  // curso nuevo anexado a una orden vieja cuenta el día que se compró, y un PIN
+  // cargado tarde de un curso viejo cuenta en su fecha. Si el PIN no se lee
+  // como fecha (o es futura) se usa la fecha en que se registró.
   let cursos = 0;
   {
-    const idsVivas = new Set(ventas.map((v) => v.id));
+    const pines: { venta_id: string; pin: string; created_at: string }[] = [];
+    // Un PIN nunca es posterior a su registro: basta traer los registrados desde el inicio del rango.
     for (let from = 0; ; from += 1000) {
       let q = supabase
         .from("venta_pines")
-        .select("venta_id")
+        .select("venta_id, pin, created_at")
         .gte("created_at", desde)
-        .lt("created_at", hasta)
         .order("created_at")
         .range(from, from + 999);
       if (sedeId) q = q.eq("sede_id", sedeId);
       const { data } = await q;
-      cursos += (data ?? []).filter((p) => idsVivas.has(p.venta_id)).length;
+      pines.push(...(data ?? []));
       if ((data?.length ?? 0) < 1000) break;
     }
+    const enRango = pines.filter((p) => {
+      const registro = new Date(p.created_at).getTime();
+      const m = /^(\d{2})(\d{2})(\d{2})/.exec(p.pin);
+      let fecha = registro;
+      if (m) {
+        const dia = Date.UTC(2000 + Number(m[1]), Number(m[2]) - 1, Number(m[3])) + OFFSET_BOGOTA_MS;
+        const valida = new Date(dia).getUTCDate() === Number(m[3]) && dia <= registro;
+        if (valida) fecha = dia;
+      }
+      return fecha >= inicioDia.getTime() && fecha < finDia.getTime() + DIA_MS;
+    });
+    const idsVentas = [...new Set(enRango.map((p) => p.venta_id))];
+    const vivas = new Set<string>();
+    for (let i = 0; i < idsVentas.length; i += 100) {
+      const { data } = await supabase
+        .from("ventas")
+        .select("id")
+        .in("id", idsVentas.slice(i, i + 100))
+        .neq("estado", "anulada")
+        .not("concepto", "ilike", "%migracion historica%");
+      for (const v of data ?? []) vivas.add(v.id);
+    }
+    cursos = enRango.filter((p) => vivas.has(p.venta_id)).length;
   }
 
   const ids = new Set(ventas.map((v) => v.id));
