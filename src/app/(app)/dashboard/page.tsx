@@ -254,13 +254,19 @@ export default async function DashboardPage({
   // puntualmente, pero se oculta si el admin filtró a una sede de CEAPP —
   // ahí mostrar datos de Valorar sería mezclar sedes que no pidió ver.
   const sedeValorar = sedes.find((s) => s.name === "C.R.C. VALORAR");
-  const mostrarTramitadoresReporte = !!sedeValorar && (!sedeFilter || sedeFilter === sedeValorar.id);
+  // También para CEAPP SANTANDER (tiene tramitadores propios): si el admin
+  // filtra a Santander, el ranking es el de esa sede. Con "Todas las sedes"
+  // se mantiene el de Valorar.
+  const sedeSantander = sedes.find((s) => s.name === "CEAPP SANTANDER");
+  const sedeReporte =
+    sedeFilter && sedeSantander && sedeFilter === sedeSantander.id ? sedeSantander : sedeValorar;
+  const mostrarTramitadoresReporte = !!sedeReporte && (!sedeFilter || sedeFilter === sedeReporte.id);
   let tramitadoresReporteQuery = supabase
     .from("tramitadores")
     .select("id, nombre")
     .eq("active", true)
     .order("nombre");
-  if (sedeValorar) tramitadoresReporteQuery = tramitadoresReporteQuery.or(`sede_id.is.null,sede_id.eq.${sedeValorar.id}`);
+  if (sedeReporte) tramitadoresReporteQuery = tramitadoresReporteQuery.or(`sede_id.is.null,sede_id.eq.${sedeReporte.id}`);
   const { data: tramitadoresReporteRows } = mostrarTramitadoresReporte
     ? await tramitadoresReporteQuery
     : { data: [] as { id: string; nombre: string }[] };
@@ -269,7 +275,7 @@ export default async function DashboardPage({
     ? await supabase
         .from("ventas")
         .select("tramitador_id")
-        .eq("sede_id", sedeValorar!.id)
+        .eq("sede_id", sedeReporte!.id)
         .neq("estado", "anulada")
         .gte("created_at", inicioMes.toISOString())
         .lt("created_at", finMes.toISOString())
@@ -455,7 +461,7 @@ export default async function DashboardPage({
       {mostrarTramitadoresReporte ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <div className="mb-3 flex items-baseline justify-between gap-2">
-            <h2 className="text-sm font-semibold text-slate-800">Personas traídas por tramitador — {nombreMesReporte}</h2>
+            <h2 className="text-sm font-semibold text-slate-800">Personas traídas por tramitador — {sedeReporte?.name} — {nombreMesReporte}</h2>
             <span className="text-xs font-semibold text-slate-500">
               Total {totalReporteTramitadores} {totalReporteTramitadores === 1 ? "venta" : "ventas"}
             </span>
